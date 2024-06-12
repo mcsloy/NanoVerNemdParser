@@ -2,6 +2,26 @@ import MDAnalysis
 from parser import NemdDisplacementFrame
 from trajectory_generator import TrajectoryGenerator
 from nemd_playback import TrajectoryPlayback
+import numpy as np
+
+
+def determine_scaling_bounds(trajectory: TrajectoryGenerator):
+    """Identifies the minimum and maximum displacements.
+
+    This is intended to be used to work out the upper and lower scaling bounds
+    for normalising the displacement to within the bounds of [0, 1] as is
+    required for colouring the various residues.
+
+    Arguments:
+        trajectory: the `TrajectoryGenerator` entity from which the atomic
+            displacement information can be sourced.
+
+    Returns:
+        minimum_displacement: The minimum displacement value.
+        maximum_displacement: The maximum displacement value.
+    """
+    displacements = np.linalg.norm(trajectory._displacements, axis=-1)
+    return np.min(displacements), np.max(displacements)
 
 
 if __name__ == "__main__":
@@ -47,6 +67,8 @@ if __name__ == "__main__":
     # Path to the directory in which the NEMD displacment files are located
     displacement_file_directory_path = r"path/to/displacement/file/directory"
 
+    # Trajectory frames shown per second.
+    fps = 15
 
     # Should MDAnalysis attempt to infer atomic bonds?
     # The NanoVer client requires a bond list to utilise the "cartoon" renderer.
@@ -58,17 +80,29 @@ if __name__ == "__main__":
     # use using the command `universe.atoms.write('protein_with_bonds.pdb', bonds='all')`.
     should_compute_bonds = False
 
+    # Specifies what type of renderer is to be used to visualise the structure
+    # by NanoVer clients. By default, a cartoon based renderer is used.
+    renderer = "cartoon extended"
+
     # Given that some displacements can be too small to easily see, it is
     # sometimes best to scale them to magnify the visual effects. Atomic
     # displacements will be scaled by the factor specified below before being
     # added to the reference frame. Note that this scaling can be done
     # dynamically while the simulation is running via either the
     # `TrajectoryGenerator` or `TrajectoryPlayback` entities.
-    displacement_scale_factor = 4.0
+    displacement_scale_factor = 1.0
 
-    # Specifies what type of renderer is to be used to visualise the structure
-    # by NanoVer clients.
-    renderer = "cartoon"
+    # If the "nemd" renderer is used, each residue will be coloured according
+    # to its displacement. The following variables set the initial range of the
+    # colour map. Ideally, the minimum and maximum values should correspond to
+    # the minimum and maximum displacements. It is important to note that the
+    # displacement values used for sampling the colour map do not include the
+    # `displacement_scale_factor`. That is to say if the maximum displacement
+    # present is 0.8 then `colour_metric_normalisation_max` should be set to
+    # `0.8` and not `0.8 * displacement_scale_factor`. If These values are not
+    # assigned then an estimation will be made later on in this script.
+    colour_metric_normalisation_min = None
+    colour_metric_normalisation_max = None
 
     # ╔════════════════════╗
     # ║   Initialisation   ║
@@ -91,12 +125,24 @@ if __name__ == "__main__":
     trajectory = TrajectoryGenerator.from_nemd_displacement_frames(displacement_frames, universe)
     universe.trajectory = trajectory
 
+    # If not scaling bounds were supplied then just set them to the maximum and
+    # minimum displacement values.
+    if not colour_metric_normalisation_min or not colour_metric_normalisation_max:
+        min_x, max_x = determine_scaling_bounds(trajectory)
+        if not colour_metric_normalisation_min:
+            colour_metric_normalisation_min = min_x
+        if not colour_metric_normalisation_max:
+            colour_metric_normalisation_max = max_x
+
     # ╔════════════════════╗
     # ║      Playback      ║
     # ╚════════════════════╝
     #
     # Construct the trajectory playback entity
-    trajectory_player = TrajectoryPlayback(universe, fps=30)
+    trajectory_player = TrajectoryPlayback(
+        universe, fps=fps,
+        colour_metric_normalisation_min=colour_metric_normalisation_min,
+        colour_metric_normalisation_max=colour_metric_normalisation_max)
 
     # Publish the topology data
     trajectory_player.send_topology_frame()

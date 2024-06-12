@@ -24,9 +24,25 @@ class TrajectoryPlayback:
     stepping through frames, and resetting the trajectory. It also handles the communication
     with the NanoVer frame server to update the particle positions in the VR environment.
 
+    Attributes:
+        universe: The MDAnalysis universe object containing the trajectory data.
+        frame_server: The NanoVer frame server to send frame data to. If None, a new
+            server is created.
+        fps: The number of frames per second for the trajectory playback.
+        colour_metric_normalisation_min: Minimum value for the normalisation
+            of the color metric.
+        colour_metric_normalisation_max: Maximum value for the normalisation
+            of the color metric.
+        colour_metric_normalisation_power: Power used for non-linear
+            normalisation of the color metric.
+
     """
 
-    def __init__(self, universe, frame_server=None, fps=60):
+    def __init__(
+            self, universe, frame_server=None, fps=60,
+            colour_metric_normalisation_min: float = 0.0,
+            colour_metric_normalisation_max: float = 1.0,
+            colour_metric_normalisation_power: float = 1.0):
         """Initialises the TrajectoryPlayback object.
 
         Sets up the MDAnalysis universe, frame server, and frames per second (fps)
@@ -37,6 +53,12 @@ class TrajectoryPlayback:
             frame_server: The NanoVer frame server to send frame data to. If None, a new
                 server is created.
             fps: The number of frames per second for the trajectory playback.
+            colour_metric_normalisation_min: Minimum value for the normalisation
+                of the color metric.
+            colour_metric_normalisation_max: Maximum value for the normalisation
+                of the color metric.
+            colour_metric_normalisation_power: Power used for non-linear
+                normalisation of the color metric.
         """
         self.universe = universe
 
@@ -57,6 +79,11 @@ class TrajectoryPlayback:
         self.frame_index = 0
 
         _ = universe.universe.trajectory[0]
+
+        self.colour_metric_normalisation_min = colour_metric_normalisation_min
+        self.colour_metric_normalisation_max = colour_metric_normalisation_max
+        self.colour_metric_normalisation_power = colour_metric_normalisation_power
+
 
     @property
     def displacement_scale_factor(self) -> float:
@@ -170,6 +197,10 @@ class TrajectoryPlayback:
         self.frame_server.frame_publisher.send_frame(0, frame)
 
     @staticmethod
+    def exponential_normalisation(x, x_min, x_max, p):
+        return (x**p - x_min**p) / (x_max**p - x_min**p)
+
+    @staticmethod
     def send_frame(trajectory_player, frame_server):
         """Sends the current frame's particle positions to the NanoVer frame server.
 
@@ -183,6 +214,21 @@ class TrajectoryPlayback:
         # Set the target frame (setting the target frame by getting the time step somewhat non-pythonic)
         _ = trajectory_player.universe.trajectory[index]
         frame = mdanalysis_to_frame_data(trajectory_player.universe, topology=False, positions=True)
+
+        # TODO: Sort out order information to ensure that things on the client
+        #   side will match up.
+        if index > 0:
+            norm_displacements = np.linalg.norm(
+                trajectory_player.universe.trajectory._displacements[index, :, :], axis=-1)
+
+            norm_displacements = trajectory_player.exponential_normalisation(
+                norm_displacements,
+                trajectory_player.colour_metric_normalisation_min,
+                trajectory_player.colour_metric_normalisation_max,
+                trajectory_player.colour_metric_normalisation_power)
+
+            frame.arrays.set("residue.normalised_metric_colour", norm_displacements)
+
         # A value of one must be added to the frame index to prevent sending
         # the value "zero" which is a special reset command used to delete
         # all stored data on the client side.
