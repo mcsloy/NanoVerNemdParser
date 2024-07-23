@@ -104,6 +104,22 @@ if __name__ == "__main__":
     colour_metric_normalisation_min = None
     colour_metric_normalisation_max = None
 
+    # The metric used for colouring the residues may also be utilised to adjust their
+    # scale, making displacements more noticeable. The size of each residue is determined
+    # by standard linear interpolation using the formula `l + (u - l) * x`, where `l`
+    # and `u` are the lower and upper bounds as defined by `residue_scale_from` and 
+    # `residue_scale_to`, respectively. The value `x` is the same normalised metric 
+    # produced during colour mapping. The final formula is:
+    #   `residue_scale_from + (residue_scale_to - residue_scale_from) *
+    #   (displacement - colour_metric_normalisation_min) /
+    #   (colour_metric_normalisation_max - colour_metric_normalisation_min)`
+    #
+    # It is recommended to keep `residue_scale_from` at `1.0`. To make scaling more 
+    # pronounced, increase the `residue_scale_to` setting. Per-residue scaling can 
+    # be disabled by setting `residue_scale_to` to `1.0`.
+    residue_scale_from = 1.0
+    residue_scale_to = 4.0
+
     # ╔════════════════════╗
     # ║   Initialisation   ║
     # ╚════════════════════╝
@@ -142,7 +158,9 @@ if __name__ == "__main__":
     trajectory_player = TrajectoryPlayback(
         universe, fps=fps,
         colour_metric_normalisation_min=colour_metric_normalisation_min,
-        colour_metric_normalisation_max=colour_metric_normalisation_max)
+        colour_metric_normalisation_max=colour_metric_normalisation_max,
+        residue_scale_from=residue_scale_from,
+        residue_scale_to=residue_scale_to)
 
     # Publish the topology data
     trajectory_player.send_topology_frame()

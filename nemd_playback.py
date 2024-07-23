@@ -11,7 +11,8 @@ from nanover.mdanalysis import mdanalysis_to_frame_data
 from threading import RLock
 import MDAnalysis
 from MDAnalysis.coordinates.memory import MemoryReader
-from nanover.trajectory.frame_server import PLAY_COMMAND_KEY, RESET_COMMAND_KEY, STEP_COMMAND_KEY, PAUSE_COMMAND_KEY
+from nanover.trajectory.frame_server import \
+    PLAY_COMMAND_KEY, RESET_COMMAND_KEY, STEP_COMMAND_KEY, PAUSE_COMMAND_KEY, STEP_BACK_COMMAND_KEY
 
 
 class TrajectoryPlayback:
@@ -24,6 +25,9 @@ class TrajectoryPlayback:
     stepping through frames, and resetting the trajectory. It also handles the communication
     with the NanoVer frame server to update the particle positions in the VR environment.
 
+    This playback instance is specifically designed to allow residues to be coloured and
+    scaled as a function of their displacement.
+
     Attributes:
         universe: The MDAnalysis universe object containing the trajectory data.
         frame_server: The NanoVer frame server to send frame data to. If None, a new
@@ -35,6 +39,13 @@ class TrajectoryPlayback:
             of the color metric.
         colour_metric_normalisation_power: Power used for non-linear
             normalisation of the color metric.
+        residue_scale_from: The size of each residue will be scaled by a value
+            between ``residue_scale_from`` and ``residue_scale_to`` depending
+            on the normalised displacement metric. The ``residue_scale_from``
+            attribute specifies the minimum scaling bounds. A value of one
+            here would indicate that residues with no displacement will have
+            an "unmodified" size.
+        residue_scale_to: The maximum size to which residues may be scaled.
 
     """
 
@@ -42,7 +53,9 @@ class TrajectoryPlayback:
             self, universe, frame_server=None, fps=60,
             colour_metric_normalisation_min: float = 0.0,
             colour_metric_normalisation_max: float = 1.0,
-            colour_metric_normalisation_power: float = 1.0):
+            colour_metric_normalisation_power: float = 1.0,
+            residue_scale_from: float = 1.0,
+            residue_scale_to: float = 5.0):
         """Initialises the TrajectoryPlayback object.
 
         Sets up the MDAnalysis universe, frame server, and frames per second (fps)
@@ -84,6 +97,9 @@ class TrajectoryPlayback:
         self.colour_metric_normalisation_max = colour_metric_normalisation_max
         self.colour_metric_normalisation_power = colour_metric_normalisation_power
 
+        self.residue_scale_from = residue_scale_from
+        self.residue_scale_to = residue_scale_to
+
 
     @property
     def displacement_scale_factor(self) -> float:
@@ -104,8 +120,8 @@ class TrajectoryPlayback:
         self.frame_server.server.register_command(PLAY_COMMAND_KEY, self.play)
         self.frame_server.server.register_command(PAUSE_COMMAND_KEY, self.pause)
         self.frame_server.server.register_command(RESET_COMMAND_KEY, self.reset)
-        # No UI button currently provided for this action in NanoVer-IMD
         self.frame_server.server.register_command(STEP_COMMAND_KEY, self.step)
+        self.frame_server.server.register_command(STEP_BACK_COMMAND_KEY, self.step_back)
 
     @property
     def is_running(self):
@@ -128,6 +144,16 @@ class TrajectoryPlayback:
         with self._cancel_lock:
             self.cancel_playback(wait=True)
             self._step_one_frame()
+
+    def step_back(self):
+        """Steps trajectory back by a single frame and then stops."""
+        # The lock here ensures only one person can cancel at a time.
+        with self._cancel_lock:
+            self.cancel_playback(wait=True)
+            self.frame_index = (self.frame_index - 1) % self.universe.trajectory.n_frames
+            print(self.frame_index)
+            self.send_frame(self, self.frame_server)
+
 
     def pause(self):
         """Pause trajectory playback."""
@@ -210,7 +236,7 @@ class TrajectoryPlayback:
         """
         index = trajectory_player.frame_index
         # Send the particle positions of the given trajectory index.
-        assert 0 <= index < trajectory_player.universe.trajectory.n_frames, f'Frame index not in range [{0},{trajectory_player.universe.trajectory.n_frames - 1}]'
+        assert 0 <= index < trajectory_player.universe.trajectory.n_frames, f'Frame index not in range [{0}, {trajectory_player.universe.trajectory.n_frames - 1}]'
         # Set the target frame (setting the target frame by getting the time step somewhat non-pythonic)
         _ = trajectory_player.universe.trajectory[index]
         frame = mdanalysis_to_frame_data(trajectory_player.universe, topology=False, positions=True)
@@ -227,11 +253,13 @@ class TrajectoryPlayback:
                 trajectory_player.colour_metric_normalisation_max,
                 trajectory_player.colour_metric_normalisation_power)
 
-            frame.arrays.set("residue.normalised_metric_colour", norm_displacements)
+            frame.arrays.set("residue.normalised_metric_c", norm_displacements)
+
+        # It might be best to set these values somewhere else.
+        frame.values.set("residue.scale_from", trajectory_player.residue_scale_from)
+        frame.values.set("residue.scale_to", trajectory_player.residue_scale_to)
 
         # A value of one must be added to the frame index to prevent sending
         # the value "zero" which is a special reset command used to delete
         # all stored data on the client side.
         frame_server.frame_publisher.send_frame(index + 1, frame)
-
-
