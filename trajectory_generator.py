@@ -71,8 +71,6 @@ class TrajectoryGenerator(ProtoReader):
         # consistent or straightforward thing.
         self.timestep.dt = 1.0
 
-
-
     @property
     def displacement_scale_factor(self):
         return self._displacement_scale_factor

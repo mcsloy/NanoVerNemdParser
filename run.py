@@ -61,11 +61,16 @@ if __name__ == "__main__":
     # ╔════════════════════╗
     # ║      Settings      ║
     # ╚════════════════════╝
+    # Note that may of the visualisation related settings, such as the choice of
+    # colour map, may be changed in an ad-hoc manner while the server is running.
     #
     # Path to the reference structure files
-    reference_structure_file_path = r"protein_file_path.pdb"
-    # Path to the directory in which the NEMD displacment files are located
-    displacement_file_directory_path = r"path/to/displacement/file/directory"
+    # reference_structure_file_path = r"protein_file_path.pdb"
+    # # Path to the directory in which the NEMD displacment files are located
+    # displacement_file_directory_path = r"path/to/displacement/file/directory"
+
+    reference_structure_file_path = r"C:\Users\golde\Desktop\NEMD\nanover-protocol\Working\Data\test.pdb"
+    displacement_file_directory_path = r"C:\Users\golde\Desktop\NEMD\nanover-protocol\Working\Data\average_displacements"
 
     # Trajectory frames shown per second.
     fps = 15
@@ -81,8 +86,16 @@ if __name__ == "__main__":
     should_compute_bonds = False
 
     # Specifies what type of renderer is to be used to visualise the structure
-    # by NanoVer clients. By default, a cartoon based renderer is used.
+    # by NanoVer clients. By default, a cartoon based renderer is used. Note
+    # that changing the renderer to anything other than "cartoon extended"
+    # will result in a loss of residue specific colouring & scaling features.
     renderer = "cartoon extended"
+
+    # Name of the colour map to be used when colouring the protein residues
+    # according to the displacement metric. This should be the name of a valid
+    # MatPlotLib colour gradient. For a list of available colour maps see
+    # matplotlib.org/stable/users/explain/colors/colormaps.html.
+    colour_map_name = "viridis"
 
     # Given that some displacements can be too small to easily see, it is
     # sometimes best to scale them to magnify the visual effects. Atomic
@@ -114,11 +127,18 @@ if __name__ == "__main__":
     #   (displacement - colour_metric_normalisation_min) /
     #   (colour_metric_normalisation_max - colour_metric_normalisation_min)`
     #
-    # It is recommended to keep `residue_scale_from` at `1.0`. To make scaling more 
+    # It is recommended to keep `residue_scale_from` at `1.0`. To make scaling re
     # pronounced, increase the `residue_scale_to` setting. Per-residue scaling can 
     # be disabled by setting `residue_scale_to` to `1.0`.
     residue_scale_from = 1.0
     residue_scale_to = 4.0
+
+    # The NanoVer session will not be recorded unless a file name is provided to
+    # the `TrajectoryPlayback` instance. By default, no recording is made. If a
+    # file path is specified, the session will be recorded and saved in a pair
+    # of files, namely "<FILE_NAME>.traj" and "<FILE_NAME>.state".
+    record_to_file = None
+
 
     # ╔════════════════════╗
     # ║   Initialisation   ║
@@ -128,7 +148,9 @@ if __name__ == "__main__":
     # if the file does not contain information about bonds, then MDAnalysis
     # must be instructed to calculate the bonds by setting the `guess_bonds`
     # flag.
-    universe = MDAnalysis.Universe(reference_structure_file_path, guess_bonds=False)
+    universe = MDAnalysis.Universe(
+        reference_structure_file_path,
+        guess_bonds=should_compute_bonds)
 
     # Load in the displacement data into a series of `NemdDisplacementFrame` instances
     displacement_frames = NemdDisplacementFrame.auto_load_displacement_frames(
@@ -160,7 +182,9 @@ if __name__ == "__main__":
         colour_metric_normalisation_min=colour_metric_normalisation_min,
         colour_metric_normalisation_max=colour_metric_normalisation_max,
         residue_scale_from=residue_scale_from,
-        residue_scale_to=residue_scale_to)
+        residue_scale_to=residue_scale_to,
+        colour_map_name=colour_map_name,
+        record_to_file=record_to_file)
 
     # Publish the topology data
     trajectory_player.send_topology_frame()
