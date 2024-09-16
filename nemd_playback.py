@@ -1,9 +1,10 @@
 import time
-from os.path import splitext
 from typing import Optional
 import numpy as np
 from concurrent import futures
 from threading import RLock
+from matplotlib import colormaps
+
 from nanover.app import NanoverFrameApplication
 from nanover.mdanalysis import mdanalysis_to_frame_data
 from nanover.omni.record import record_from_server
@@ -11,7 +12,7 @@ from nanover.trajectory import FrameData
 from nanover.trajectory.frame_server import \
     PLAY_COMMAND_KEY, RESET_COMMAND_KEY, STEP_COMMAND_KEY, PAUSE_COMMAND_KEY, STEP_BACK_COMMAND_KEY
 
-from matplotlib import colormaps
+from generators import SimpleGenerator
 
 
 class TrajectoryPlayback:
@@ -38,6 +39,8 @@ class TrajectoryPlayback:
             of the color metric.
         colour_metric_normalisation_power: Power used for non-linear
             normalisation of the color metric.
+
+    Properties:
         residue_scale_from: The size of each residue will be scaled by a value
             between ``residue_scale_from`` and ``residue_scale_to`` depending
             on the normalised displacement metric. The ``residue_scale_from``
@@ -54,7 +57,6 @@ class TrajectoryPlayback:
             the associated NanoVer session should be stored. If no file path
             is provided, then no recording will be made. This will default to
             `None`, i.e. no recording.
-
     """
 
     def __init__(
@@ -139,6 +141,9 @@ class TrajectoryPlayback:
 
         if record_to_file:
             self.record()
+
+        if not isinstance(universe.trajectory, SimpleGenerator):
+            raise TypeError("Trajectory object must be a `SimpleGenerator` instance.")
 
     @property
     def displacement_scale_factor(self) -> float:
@@ -306,10 +311,15 @@ class TrajectoryPlayback:
 
     def send_frame(self):
         """Sends the current frame's particle positions to the NanoVer frame server."""
+
         index = self.frame_index
 
-        # Send the particle positions of the given trajectory index.
+        trajectory: SimpleGenerator = self.universe.trajectory
 
+        if not isinstance(trajectory, SimpleGenerator):
+            raise TypeError("Trajectory object must be a `SimpleGenerator` instance.")
+
+        # Send the particle positions of the given trajectory index.
         if not (0 <= index < self.universe.trajectory.n_frames):
             raise ValueError(f'Frame index not in range [{0}, {self.universe.trajectory.n_frames - 1}]')
 
@@ -317,18 +327,13 @@ class TrajectoryPlayback:
         _ = self.universe.trajectory[index]
         frame = mdanalysis_to_frame_data(self.universe, topology=False, positions=True)
 
-        if index > 0:
-            norm_displacements = np.linalg.norm(
-                self.universe.trajectory._displacements[index, :, :], axis=-1)
+        norm_displacements = self.exponential_normalisation(
+            trajectory.get_displacement_norms(),
+            self.colour_metric_normalisation_min,
+            self.colour_metric_normalisation_max,
+            self.colour_metric_normalisation_power)
 
-            norm_displacements = self.exponential_normalisation(
-                norm_displacements,
-                self.colour_metric_normalisation_min,
-                self.colour_metric_normalisation_max,
-                self.colour_metric_normalisation_power)
-
-            frame.arrays.set("residue.normalised_metric_c", norm_displacements)
-
+        frame.arrays.set("residue.normalised_metric_c", norm_displacements)
 
         if self._send_meta_data:
             frame.values.set("residue.scale_from", self.residue_scale_from)
@@ -366,5 +371,3 @@ class TrajectoryPlayback:
             f"localhost:{self.frame_server.port}",
             f"{self._record_to_file}.traj",
             f"{self._record_to_file}.state")
-
-

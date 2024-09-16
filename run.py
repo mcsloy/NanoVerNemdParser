@@ -1,60 +1,28 @@
 import MDAnalysis
-from parser import NemdDisplacementFrame
-from trajectory_generator import TrajectoryGenerator
+from generators import SimpleGenerator
 from nemd_playback import TrajectoryPlayback
-import numpy as np
-
-
-def determine_scaling_bounds(trajectory: TrajectoryGenerator):
-    """Identifies the minimum and maximum displacements.
-
-    This is intended to be used to work out the upper and lower scaling bounds
-    for normalising the displacement to within the bounds of [0, 1] as is
-    required for colouring the various residues.
-
-    Arguments:
-        trajectory: the `TrajectoryGenerator` entity from which the atomic
-            displacement information can be sourced.
-
-    Returns:
-        minimum_displacement: The minimum displacement value.
-        maximum_displacement: The maximum displacement value.
-    """
-    displacements = np.linalg.norm(trajectory._displacements, axis=-1)
-    return np.min(displacements), np.max(displacements)
-
 
 if __name__ == "__main__":
     """Example parser for sending NEMD displacement data to NanoVer-IMD.
 
-    This script uses a custom file parser entity, `NemdDisplacementFrame`, to load
-    in and represent NEMD displacement data. It can also convert a sequence of such
-    files into a trajectory amenable to representation by `MDAnalysis`.
-
+    This script uses a custom file parser entity, `DisplacementFrames`, to load
+    in and represent the D-NEMD displacement data. This than can be wrapped in
+    a `SimpleGenerator` class to make it accessible to `MDAnalysis.Universe`
+    entities.
+    
     The `MDAnalysis` based trajectories may then be hosted by NanoVer using a
     traditional server structure, an interface for which is provided by the
     `TrajectoryPlayback` class.
 
     Usage:
         Specify the location of the base structural file using the variable
-        `reference_structure_file_path`. The directory in which the displacement
-        files are stored may be provided via `displacement_file_directory_path`.
-        The displacement files will then be auto-loaded by the helper function
-         `auto_load_displacement_frames`. However, this may be done manually
-         if the file names do not match the initially agreed upon file naming
-         scheme, i.e. "average_xyz_displacement_<TIME>ps" where "<TIME>" is some
-         integer specifying the time in picoseconds.
-         
+        `reference_structure_file_path`. The HDF5 file storing the D-NEMD data
+        should then be assigned to the variable `displacement_file`.
+
          Other trajectory and visualisation options can be controlled by the
          supplementary variables provided in the code shown below. Note that
          documentation for these options is provided in the comments rather
          than within this docstring.  
-
-    Warning:
-        This will load all frame data into memory via an `MDAnalysis.MemoryReader`
-        instance. This may result in significant memory usage. If this becomes an
-        issue, then `numpy.memmap` arrays may need to be implemented to lighten
-        the memory footprint.
     """
     from nanover.app import NanoverImdClient
 
@@ -65,12 +33,9 @@ if __name__ == "__main__":
     # colour map, may be changed in an ad-hoc manner while the server is running.
     #
     # Path to the reference structure files
-    # reference_structure_file_path = r"protein_file_path.pdb"
-    # # Path to the directory in which the NEMD displacment files are located
-    # displacement_file_directory_path = r"path/to/displacement/file/directory"
-
-    reference_structure_file_path = r"C:\Users\golde\Desktop\NEMD\nanover-protocol\Working\Data\test.pdb"
-    displacement_file_directory_path = r"C:\Users\golde\Desktop\NEMD\nanover-protocol\Working\Data\average_displacements"
+    reference_structure_file_path = r"protein_file_path.pdb"
+    # Path to the hdf5 file storing the D-NEMD displacement data
+    displacement_file = r"path/to/the/displacement/data/file.h5"
 
     # Trajectory frames shown per second.
     fps = 15
@@ -120,15 +85,15 @@ if __name__ == "__main__":
     # The metric used for colouring the residues may also be utilised to adjust their
     # scale, making displacements more noticeable. The size of each residue is determined
     # by standard linear interpolation using the formula `l + (u - l) * x`, where `l`
-    # and `u` are the lower and upper bounds as defined by `residue_scale_from` and 
-    # `residue_scale_to`, respectively. The value `x` is the same normalised metric 
+    # and `u` are the lower and upper bounds as defined by `residue_scale_from` and
+    # `residue_scale_to`, respectively. The value `x` is the same normalised metric
     # produced during colour mapping. The final formula is:
     #   `residue_scale_from + (residue_scale_to - residue_scale_from) *
     #   (displacement - colour_metric_normalisation_min) /
     #   (colour_metric_normalisation_max - colour_metric_normalisation_min)`
     #
     # It is recommended to keep `residue_scale_from` at `1.0`. To make scaling re
-    # pronounced, increase the `residue_scale_to` setting. Per-residue scaling can 
+    # pronounced, increase the `residue_scale_to` setting. Per-residue scaling can
     # be disabled by setting `residue_scale_to` to `1.0`.
     residue_scale_from = 1.0
     residue_scale_to = 4.0
@@ -138,7 +103,6 @@ if __name__ == "__main__":
     # file path is specified, the session will be recorded and saved in a pair
     # of files, namely "<FILE_NAME>.traj" and "<FILE_NAME>.state".
     record_to_file = None
-
 
     # ╔════════════════════╗
     # ║   Initialisation   ║
@@ -152,25 +116,16 @@ if __name__ == "__main__":
         reference_structure_file_path,
         guess_bonds=should_compute_bonds)
 
-    # Load in the displacement data into a series of `NemdDisplacementFrame` instances
-    displacement_frames = NemdDisplacementFrame.auto_load_displacement_frames(
-        displacement_file_directory_path)
-
-    # Note that displacement data can also be loaded manually like so:
-    # displacement_frames = list(map(NemdDisplacementFrame.load, [path_one, path_two, ...]))
-
     # Construct the trajectory entity, and assign it to the universe object
-    trajectory = TrajectoryGenerator.from_nemd_displacement_frames(displacement_frames, universe)
+    trajectory = SimpleGenerator(displacement_file)
     universe.trajectory = trajectory
 
     # If not scaling bounds were supplied then just set them to the maximum and
     # minimum displacement values.
-    if not colour_metric_normalisation_min or not colour_metric_normalisation_max:
-        min_x, max_x = determine_scaling_bounds(trajectory)
-        if not colour_metric_normalisation_min:
-            colour_metric_normalisation_min = min_x
-        if not colour_metric_normalisation_max:
-            colour_metric_normalisation_max = max_x
+    if not colour_metric_normalisation_min:
+        colour_metric_normalisation_min = trajectory.minimum_displacement_distance
+    if not colour_metric_normalisation_max:
+        colour_metric_normalisation_max = trajectory.maximum_displacement_distance
 
     # ╔════════════════════╗
     # ║      Playback      ║
