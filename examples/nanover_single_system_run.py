@@ -19,10 +19,10 @@ if __name__ == "__main__":
         `reference_structure_file_path`. The HDF5 file storing the D-NEMD data
         should then be assigned to the variable `displacement_file`.
 
-         Other trajectory and visualisation options can be controlled by the
-         supplementary variables provided in the code shown below. Note that
-         documentation for these options is provided in the comments rather
-         than within this docstring.  
+        Other trajectory and visualisation options can be controlled by the
+        supplementary variables provided in the code shown below. Note that
+        documentation for these options is provided in the comments rather
+        than within this docstring.  
     """
 
     # ╔════════════════════╗

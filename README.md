@@ -82,7 +82,7 @@ with h5py.File(path_to_hdf5_file, "r") as file:
     frames = DisplacementFrames.read_from_hdf5_group(group)
 ```
 
-When working with very large datasets, loading all of data into memory at once may be impractical or even impossible. For this reason, the `DisplacementFrames` class explicitly supports the HDF5 memory-mapping feature. This feature may be enabled by setting the `memory_mapped` flag to `True` when invoking the `read_from_hdf5_group` method. This will keep the data arrays as `h5py.Datasets`, which permits indexing to take place without loading the entire array into memory. However, it is worth noting that the associated HDF5 file must remain open for duration of the instance's lifetime. When used in memory-mapped mode, the associated `h5py.File` instance may be accessed via the `get_memory_mapped_file` method. 
+When working with very large datasets, loading all the data into memory at once may be impractical or even impossible. For this reason, the `DisplacementFrames` class explicitly supports the HDF5 memory-mapping feature. This feature may be enabled by setting the `memory_mapped` flag to `True` when invoking the `read_from_hdf5_group` method. This will keep the data arrays as `h5py.Datasets`, which permits indexing to take place without loading the entire array into memory. However, it is worth noting that the associated HDF5 file must remain open for duration of the instance's lifetime. When used in memory-mapped mode, the associated `h5py.File` instance may be accessed via the `get_memory_mapped_file` method. 
 
 If an HDF5 contains only a single D-NEMD entry, and that entry is stored at the root node, then the `read` may be used to instantiate a `DisplacementFrames` instance from a file path:
 ```python

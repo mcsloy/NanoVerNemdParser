@@ -20,10 +20,10 @@ if __name__ == "__main__":
         `reference_structure_file_path`. The HDF5 file storing the D-NEMD data
         should then be assigned to the variable `displacement_file`.
 
-         Other trajectory and visualisation options can be controlled by the
-         supplementary variables provided in the code shown below. Note that
-         documentation for these options is provided in the comments rather
-         than within this docstring.  
+        Other trajectory and visualisation options can be controlled by the
+        supplementary variables provided in the code shown below. Note that
+        documentation for these options is provided in the comments rather
+        than within this docstring.  
     """
 
     # ╔════════════════════╗
@@ -35,7 +35,7 @@ if __name__ == "__main__":
     # Path to the reference structure file
     reference_structure_file_path = r"protein_file_path.pdb"
     # Paths to the hdf5 files storing the D-NEMD displacement data
-    displacement_file_1 = r"path/to/the/displacement/data/file_1.h5
+    displacement_file_1 = r"path/to/the/displacement/data/file_1.h5"
     displacement_file_2 = r"path/to/the/displacement/data/file_2.h5"
 
     # In some situations it may be desirable to offset the position of the second
