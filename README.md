@@ -12,19 +12,19 @@ As of schema version `1.0`, each entry consists of a single `group`, eleven `dat
 ### Datasets
 All of the `datasets` are stored within the entry's root `group`. The `datasets`, listed in the following table, can be roughly partitioned into one of three data categories, as outlined below.
 
-| Name                                 | Type  | Shape               | Description                                             |     |
-| ------------------------------------ | ----- | ------------------- | ------------------------------------------------------- | --- |
-| `reference_structure_atomic_numbers` | int   | $n$                 | Atomic numbers of the reference structure atoms         |     |
-| `reference_structure_positions`      | float | $n\times 3$         | Positions of atoms in the reference structure           |     |
-| `atomic_indices`                     | int   | $m$                 | Indices of atoms associated with displacements          |     |
-| `displacement_vectors`               | float | $k\times m\times 3$ | Mean displacement vectors for tracked atoms over frames |     |
-| `displacement_norms`                 | float | $k$                 | Euclidean norms of the displacement vectors             |     |
-| `sample_sizes`                       | int   | $k\times m\times 3$ | Number of samples taken for each atom in x, y, and z    |     |
-| `standard_error_1_vectors`           | float | $k\times m\times 3$ | Standard error of displacement vectors (1σ)             |     |
-| `standard_error_1_norms`             | float | $k\times m$         | Standard error of displacement vector norms (1σ)        |     |
-| `standard_error_2_vectors`           | float | $k\times m\times 3$ | Standard error of displacement vectors (2σ)             |     |
-| `standard_error_2_norms`             | float | $k\times m$         | Standard error of displacement vector norms (2σ)        |     |
-| `frame_times`                        | float | $k$                 | Simulation times for each frame                         |     |
+| Name                                 | Type  | Shape               | Description                                             |
+| ------------------------------------ | ----- | ------------------- | ------------------------------------------------------- |
+| `reference_structure_atomic_numbers` | int   | $n$                 | Atomic numbers of the reference structure atoms         |
+| `reference_structure_positions`      | float | $n\times 3$         | Positions of atoms in the reference structure           |
+| `atomic_indices`                     | int   | $m$                 | Indices of atoms associated with displacements          |
+| `displacement_vectors`               | float | $k\times m\times 3$ | Mean displacement vectors for tracked atoms over frames |
+| `displacement_norms`                 | float | $k$                 | Euclidean norms of the displacement vectors             |
+| `sample_sizes`                       | int   | $k\times m\times 3$ | Number of samples taken for each atom in x, y, and z    |
+| `standard_error_1_vectors`           | float | $k\times m\times 3$ | Standard error of displacement vectors (1σ)             |
+| `standard_error_1_norms`             | float | $k\times m$         | Standard error of displacement vector norms (1σ)        |
+| `standard_error_2_vectors`           | float | $k\times m\times 3$ | Standard error of displacement vectors (2σ)             |
+| `standard_error_2_norms`             | float | $k\times m$         | Standard error of displacement vector norms (2σ)        |
+| `frame_times`                        | float | $k$                 | Simulation times for each frame                         |
 
 #### Reference Structure
 The **`reference_structure_atomic_numbers`** array, as the name suggests, is an integer array of length $n$, specifying the atomic number of each of the $n$ atoms in the reference structure. The **`reference_structure_positions`** array is a float array of size $n \times 3$, reporting the positions of these atoms. Together, these two arrays collectively define the reference structure linked to the nonequilibrium atomic displacement data reported in this entry. Typically, displacement data files are paired with a reference structure file, which provides detailed information about the equilibrium structure. However, the atomic numbers and positions of the atoms in the reference structure are stored within the displacement data. This allows the displaced positions to be calculated independently, without needing the reference structure file.
