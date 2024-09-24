@@ -411,7 +411,7 @@ class DisplacementFrames:
         # Create and open a new HDF5 file at the specified location.
         with File(file_path, "w") as file:
             # The place the data at the top level of the file.
-            self.to_hdf5_group(file)
+            self.write_to_hdf5_group(file)
 
     def write_to_hdf5_group(self, target: File | Group):
         """Serialise a `DisplacementFrames` entity into an HDF5 entry.
