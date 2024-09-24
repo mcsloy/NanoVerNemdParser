@@ -1,6 +1,7 @@
 import MDAnalysis
-from generators import SimpleGenerator
-from nemd_playback import TrajectoryPlayback
+from dnemd.nanover.generators import DoubledGenerator
+from dnemd.nanover.nemd_playback import TrajectoryPlayback
+from dnemd.parsing.pdb import load_pdb_file_as_doubled_mdanalysis_topology
 
 if __name__ == "__main__":
     """Example parser for sending NEMD displacement data to NanoVer-IMD.
@@ -24,7 +25,6 @@ if __name__ == "__main__":
          documentation for these options is provided in the comments rather
          than within this docstring.  
     """
-    from nanover.app import NanoverImdClient
 
     # ╔════════════════════╗
     # ║      Settings      ║
@@ -32,10 +32,27 @@ if __name__ == "__main__":
     # Note that may of the visualisation related settings, such as the choice of
     # colour map, may be changed in an ad-hoc manner while the server is running.
     #
-    # Path to the reference structure files
+    # Path to the reference structure file
     reference_structure_file_path = r"protein_file_path.pdb"
-    # Path to the hdf5 file storing the D-NEMD displacement data
-    displacement_file = r"path/to/the/displacement/data/file.h5"
+    # Paths to the hdf5 files storing the D-NEMD displacement data
+    displacement_file_1 = r"path/to/the/displacement/data/file_1.h5
+    displacement_file_2 = r"path/to/the/displacement/data/file_2.h5"
+
+    # In some situations it may be desirable to offset the position of the second
+    # structure with respect to the first. If this is set to `None` then the two
+    # structures will lie directly ontop of one another. Offsets can be defined
+    # using a numpy a ray like so `offset = np.array([20., 0., 0.])`.
+    offset = None
+
+    # Given that the "two" systems will more or less lie ontop of one another
+    # it can be somewhat hard to determine where one system starts and the other
+    # ends. For this reason one may change the transparency of the proteins by
+    # adjusting the alpha value. The alpha value should be assigned a value
+    # within the domain [0, 1], with values closer to `1.0` being more opaque
+    # and chose closer to `0.0` being more transparent. This will effectively
+    # override the alpha values defined in the colour map. If you do not wish
+    # this to happen then set this to `None` instead.
+    alpha = 0.5
 
     # Trajectory frames shown per second.
     fps = 15
@@ -113,11 +130,12 @@ if __name__ == "__main__":
     # must be instructed to calculate the bonds by setting the `guess_bonds`
     # flag.
     universe = MDAnalysis.Universe(
-        reference_structure_file_path,
+        load_pdb_file_as_doubled_mdanalysis_topology(
+            reference_structure_file_path),
         guess_bonds=should_compute_bonds)
 
     # Construct the trajectory entity, and assign it to the universe object
-    trajectory = SimpleGenerator(displacement_file)
+    trajectory = DoubledGenerator([displacement_file_1, displacement_file_2], offset=offset)
     universe.trajectory = trajectory
 
     # If not scaling bounds were supplied then just set them to the maximum and
@@ -139,6 +157,7 @@ if __name__ == "__main__":
         residue_scale_from=residue_scale_from,
         residue_scale_to=residue_scale_to,
         colour_map_name=colour_map_name,
+        alpha=alpha,
         record_to_file=record_to_file)
 
     # Publish the topology data
@@ -151,12 +170,7 @@ if __name__ == "__main__":
     # ╚════════════════════╝
     #
     # Enable cartoon rendering mode, or whatever was specified in the settings section.
-    client = NanoverImdClient.autoconnect()
-    client.subscribe_multiplayer()
-    client.subscribe_to_frames()
-    root_selection = client.root_selection
-    root_selection.renderer = renderer
-    root_selection.flush_changes()
+    trajectory_player.set_global_renderer(renderer)
 
     # Scale the displacements by the following factor to make them more evident
     trajectory_player.displacement_scale_factor = displacement_scale_factor

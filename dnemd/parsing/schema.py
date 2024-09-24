@@ -1,6 +1,4 @@
 from typing import Optional, Self
-
-import h5py
 import numpy as np
 from packaging.version import Version
 from h5py import File, Group, Dataset
@@ -50,8 +48,8 @@ class DisplacementFrames:
             and T represents the number of tracked atoms.
         displacement_norms: an array, of length N, storing the Euclidean norm
             of the displacement vectors.
-        sample_sizes: a T×3 array specifying the number of samples taken along
-            each dimension (x,y,z) for each target atom.
+        sample_sizes: an N×T×3 array specifying the number of samples taken along
+            each dimension (x,y,z) for each target atom at each timestep.
         standard_error_1_vectors: the standard error of the displacement vectors
             calculated using a standard deviation of one. This should be an
             array of shape N×T×3.
@@ -195,9 +193,39 @@ class DisplacementFrames:
         self.spatial_units: Optional[str] = kwargs.get("spatial_units")
         self.temporal_units: Optional[str] = kwargs.get("temporal_units")
 
+        # Ensure that the number of atomic numbers specified in the reference
+        # structure matches up with the number of supplied positions.
+        if (reference_structure_atomic_numbers.shape[0]
+                != reference_structure_positions.shape[0]):
+            raise IndexError(
+                "Inconsistency detected in the number of atoms indicated by the"
+                " length of the `reference_structure_atomic_numbers` and "
+                "`reference_structure_positions` arrays.")
+
+        # Varify that the arrays are of the correct length
+        n = atomic_indices.shape[0]
+        check = self.__check_shape
+        check(n, displacement_vectors, "displacement_vectors")
+        check(n, standard_error_1_norms, "standard_error_1_norms")
+        check(n, sample_sizes, "sample_sizes")
+        check(n, standard_error_1_vectors, "standard_error_1_vectors")
+        check(n, standard_error_1_norms, "standard_error_1_norms")
+        check(n, standard_error_2_vectors, "standard_error_2_vectors")
+        check(n, standard_error_2_norms, "standard_error_2_norms")
+        check(n, frame_times, "standard_error_2_norms")
+
+        # Ensure that the frame times array is ordered & contains no duplicates
         if not all(frame_times[:-1] < frame_times[1:]):
             raise ValueError(
                 "The `frame_times` array must be ordered & contain no duplicates.")
+
+    @staticmethod
+    def __check_shape(n, array, name):
+        expected_shape = (n, *array.shape[1:])
+        if array.shape[0] != n:
+            raise IndexError(
+                f"Shape mismatch detected in array `{name}`; "
+                f"expected {expected_shape}, but found {array.shape}.")
 
     # region Properties
     @property
@@ -385,7 +413,7 @@ class DisplacementFrames:
             # The place the data at the top level of the file.
             self.to_hdf5_group(file)
 
-    def to_hdf5_group(self, target: File | Group):
+    def write_to_hdf5_group(self, target: File | Group):
         """Serialise a `DisplacementFrames` entity into an HDF5 entry.
 
         Arguments:
@@ -587,3 +615,5 @@ def _convert_old_files(
         np.array(frame_times, dtype=float),
         **kwargs
     )
+
+

@@ -1,22 +1,120 @@
 from typing import Optional
+from abc import ABC, abstractmethod
 import errno
 import numpy as np
 from numpy.typing import NDArray
-from schema import DisplacementFrames
+from ..parsing.schema import DisplacementFrames
 
 from MDAnalysis.coordinates.base import ReaderBase
 from MDAnalysis.coordinates.timestep import Timestep
 
 
-# Given that some displacements can be too small to easily see, it is
-# sometimes best to scale them to magnify the visual effects. Atomic
-# displacements will be scaled by the factor specified below before being
-# added to the reference frame. Note that this scaling can be done
-# dynamically while the simulation is running via either the
-# `TrajectoryGenerator` or `TrajectoryPlayback` entities.
+class DNemdTrajectoryGenerator(ReaderBase, ABC):
+
+    def __init__(self, filename, *args, **kwargs):
+        super().__init__(filename, **kwargs)
+
+    @property
+    @abstractmethod
+    def n_frames(self):
+        """Number of frames in the trajectory generator."""
+        pass
+
+    @property
+    @abstractmethod
+    def displacement_scale_factor(self):
+        """Factor to scale displacements by when added to the reference frame."""
+        pass
+
+    @displacement_scale_factor.setter
+    @abstractmethod
+    def displacement_scale_factor(self, value: float):
+        pass
+
+    @property
+    @abstractmethod
+    def n_atoms(self):
+        """Number of atoms present in the simulation."""
+        pass
+
+    # Public accessor for the `_read_frame` method. The private method is required
+    # by the abstract base class.
+    def read_frame(self, frame: int) -> Timestep:
+        """Read the specified frame.
+
+        This method will move the trajectory generator object to a specific frame
+        in the simulation. The data will be loaded into the trajectory generator's
+        time step entity, which will then be returned.
+
+        Arguments:
+            frame: index of the frame to be read.
+
+        Returns:
+            timestep: a `Timestep` entity containing the requested frame data.
+        """
+        return self._read_frame(frame)
+
+    @abstractmethod
+    def get_displacements(self, index: Optional[int] = None):
+        """Get the displacement vectors at the requested index.
+
+        This method returns the displacement vectors for the tracked atoms at
+        the specified frame.
+
+        Arguments:
+            index: index for the frame at which the displacements at to be
+                returned. If no index is provided, then the index of the
+                current frame will be used.
+
+        Returns:
+             displacement_vectors: the displacement vectors of the tracked atoms
+                at the specified frame.
+
+        Notes:
+            Displacement vectors will only be returned for the tracked atoms.
+            Furthermore, displacement vectors that fall outside the confidence
+            level, as specified by `confidence_level`, will be zeroed out.
+        """
+        pass
+
+    @abstractmethod
+    def get_displacement_norms(self, index: Optional[int] = None):
+        """Get the displacement vector norms at the requested index.
+
+        This method returns the displacement vector norms for the tracked atoms
+        at the specified frame.
+
+        Arguments:
+            index: index for the frame at which the displacements at to be
+                returned. If no index is provided, then the index of the
+                current frame will be used.
+
+        Returns:
+             displacement_vector_norms: the displacement vector norms of the
+                tracked atoms at the specified frame.
+
+        Notes:
+            Displacement vector norms will only be returned for the tracked
+            atoms. Furthermore, displacement vector norms that fall outside the
+            confidence level, as specified by `confidence_level`, will be
+            zeroed out.
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def minimum_displacement_distance(self) -> float:
+        """Minimum displacement distance found in the trajectory."""
+        pass
+
+    @property
+    @abstractmethod
+    def maximum_displacement_distance(self) -> float:
+        """Maximum displacement distance found in the trajectory."""
+        pass
 
 
-class SimpleGenerator(ReaderBase):
+class SimpleDNemdGenerator(DNemdTrajectoryGenerator):
     """Trajectory entity for iterating over D-NEMD frames.
 
     This is designed to take the place of a standard MDAnalysis trajectory entity.
@@ -63,11 +161,14 @@ class SimpleGenerator(ReaderBase):
         # maintenance. It would be preferable for `ts` to be properly defined
         # within the initialiser to ensure predictable access. Hens, the time-
         # -step attribute is defined here:
-        self.ts: Timestep = Timestep(
-            self._displacement_frames.number_of_atoms_in_reference_structure)
+        self.ts: Timestep = Timestep(self.n_atoms)
 
         self._minimum_displacement_distance = None
         self._maximum_displacement_distance = None
+
+    @property
+    def displacement_frames(self) -> DisplacementFrames:
+        return self._displacement_frames
 
     @property
     def n_frames(self):
@@ -87,43 +188,26 @@ class SimpleGenerator(ReaderBase):
         self._displacement_scale_factor = value
         self._read_frame(self.ts.frame)
 
-    def _read_frame_into(self, frame: int, ts: Timestep) -> Timestep:
-        """Read a specific frame.
+    @property
+    def n_atoms(self):
+        return self._displacement_frames.number_of_atoms_in_reference_structure
 
-        This method loads the data at the requested frame into the `Timestep`
-        entity provided via the ``ts`` argument. If no time step entity is
-        provided, then the instance's internal time step entity is used.
+    # Public accessor for the `_read_frame` method. The private method is required
+    # by the abstract base class.
+    def read_frame(self, frame: int) -> Timestep:
+        """Read the specified frame.
+
+        This method will move the trajectory generator object to a specific frame
+        in the simulation. The data will be loaded into the trajectory generator's
+        time step entity, which will then be returned.
 
         Arguments:
             frame: index of the frame to be read.
-            ts: optionally, a `Timestep` entity may be provided into which the
-                frame data will be stored. If not specified then the frame data
-                will be stored into the class instance's own time step entity.
 
         Returns:
-              timestep: a `Timestep` entity containing the requested frame data.
+            timestep: a `Timestep` entity containing the requested frame data.
         """
-        # Store data into the supplied timestep object if provided, otherwise
-        # use the class instance's internal timestep attribute.
-        ts = self.ts if not ts else ts
-
-        # Set the `frame` index attribute of the `Timestep` entity to the
-        # specified frame number.
-        ts.frame = frame
-
-        # Ensure that the frame index is not out of range.
-        if ts.frame >= self.n_frames:
-            raise IOError(errno.EIO, "End of trajectory file reached")
-
-        # Update the positions
-        ts.positions = self._get_scaled_positions_at_frame(ts.frame)
-
-        # The time must be updated manually as temporal distribution of D-NEMD
-        # displacement frames is not linear.
-        ts.time = self._displacement_frames.frame_times[ts.frame]
-
-        # Return the timestep instance
-        return ts
+        return self._read_frame(frame)
 
     def _read_frame(self, frame: int) -> Timestep:
         """Read the specified frame.
@@ -138,8 +222,23 @@ class SimpleGenerator(ReaderBase):
         Returns:
             timestep: a `Timestep` entity containing the requested frame data.
         """
+        # Set the `frame` index attribute of the `Timestep` entity to the
+        # specified frame number.
+        self.ts.frame = frame
 
-        return self._read_frame_into(frame, self.ts)
+        # Ensure that the frame index is not out of range.
+        if self.ts.frame >= self.n_frames:
+            raise IOError(errno.EIO, "End of trajectory file reached")
+
+        # Update the positions
+        self.ts.positions = self._get_scaled_positions_at_frame(self.ts.frame)
+
+        # The time must be updated manually as temporal distribution of D-NEMD
+        # displacement frames is not linear.
+        self.ts.time = self._displacement_frames.frame_times[self.ts.frame]
+
+        # Return the timestep instance
+        return self.ts
 
     def _read_next_timestep(self, ts: Optional[Timestep] = None) -> Timestep:
         """Read the next frame in the trajectory.
@@ -152,12 +251,17 @@ class SimpleGenerator(ReaderBase):
             ts: optionally, a `Timestep` entity may be provided into which the
                 frame data will be stored. If not specified then the frame data
                 will be stored into the class instance's own time step entity.
+                Note that this argument is currently **not** supported.
 
         Returns:
               timestep: a `Timestep` entity containing the next frame's data.
         """
-        ts = self.ts if not ts else ts
-        return self._read_frame_into(ts.frame + 1, ts)
+        if ts is not None:
+            raise NotImplemented(
+                "Loading the next frame into a new `Timestep` entity is not "
+                "supported.")
+
+        return self._read_frame(self.ts.frame + 1)
 
     def _get_positions_at_frame(self, index: int) -> NDArray[float]:
         """Get the positions of the atoms at the specified frame.
@@ -366,7 +470,7 @@ class SimpleGenerator(ReaderBase):
                 * self._displacement_frames.number_of_displacements)
 
         # If the displacement array contains fewer than one hundred million values
-        # then then load all data in from file and compute the extrema values directly.
+        # then load all data in from file and compute the extrema values directly.
         if array_size < 1_000_000_000:
             displacement_norms = self._displacement_frames.displacement_norms[:, :]
             min_value, max_value = np.min(displacement_norms), np.max(displacement_norms)
@@ -393,3 +497,230 @@ class SimpleGenerator(ReaderBase):
 
         self._minimum_displacement_distance = min_value
         self._maximum_displacement_distance = max_value
+
+
+class DoubledGenerator(DNemdTrajectoryGenerator):
+
+
+    def __init__(
+            self, filenames: list[str], confidence_level: int = 0,
+            displacement_scale_factor: float = 1.0,
+            offset: Optional[NDArray[float]] = None, **kwargs):
+        """Trajectory entity for iterating over D-NEMD frames.
+
+        This is designed to take the place of a standard MDAnalysis trajectory
+        entity. Its primary task is to act as a data source from which MDAnalysis
+        universe entities can poll molecular dynamics trajectory frames from.
+
+        Arguments:
+            filename: path to the file that is to be read.
+            displacement_scale_factor: the factor by which displacements are to
+                be scaled before adding them to the reference structure when
+                generating a trajectory frame. This can be used to exaggerate
+                atomic displacements that would otherwise be too small to easily
+                see. Note that this only effects the trajectory positions stored
+                in the `TimeStep` object. Default = 1.0.
+            confidence_level: not yet implemented.
+
+        """
+        super().__init__(None, **kwargs)
+
+        if not isinstance(filenames, list):
+            raise TypeError(
+                "The doubled trajectory generator `DoubledGenerator` requires "
+                "a pair of files to function. Please provide a list containing "
+                "two file paths.")
+
+        if len(filenames) != 2:
+            raise TypeError(
+                "The doubled trajectory generator `DoubledGenerator` requires "
+                f"exactly two files, but was provided with {len(filenames)}.")
+
+        self._sub_generator_1 = SimpleDNemdGenerator(filenames[0])
+        self._sub_generator_2 = SimpleDNemdGenerator(filenames[1])
+
+        if self._sub_generator_1.n_frames != self._sub_generator_2.n_frames:
+            raise IndexError(
+                "Frame count missmatch detected; the two displacement trajectory "
+                "files must have the same number of frames.")
+
+        if (self._sub_generator_1.displacement_frames.frame_times
+                != self._sub_generator_2.displacement_frames.frame_times):
+            raise ValueError(
+                "Frame time sync error detected; simulation times of the two "
+                "displacement trajectory files must match up' e.g. if frame "
+                "40 in the first trajectory corresponds to 100 ps then the "
+                "40th frame of of the second trajectory must also correspond "
+                "to a simulated time of 100 ps."
+            )
+
+        if self._sub_generator_1.n_atoms != self._sub_generator_2.n_atoms:
+            NotImplementedError(
+                "Currently, `DoubledGenerator` instance only support pairs of "
+                "displacements with equal numbers of atoms."
+            )
+
+        self.confidence_level = confidence_level
+
+        self._displacement_scale_factor = displacement_scale_factor
+
+        self._offset = offset
+
+        # Developer's Note:
+        # -----------------
+        # Within the abstract base classes the `ts` attribute is assigned
+        # dynamically within functions rather than during initialisation. This
+        # design may lead to inconsistent behaviour and unclear expectations
+        # regarding its availability, which can complicate debugging and
+        # maintenance. It would be preferable for `ts` to be properly defined
+        # within the initialiser to ensure predictable access. Hens, the time-
+        # -step attribute is defined here:
+        self.ts: Timestep = Timestep(self.n_atoms)
+
+    @property
+    def n_atoms(self):
+        return self._sub_generator_1.n_atoms + self._sub_generator_2.n_atoms
+
+    @property
+    def n_frames(self):
+        """Number of frames in the trajectory generator."""
+        return self._sub_generator_1.displacement_frames.number_of_frames
+
+    @property
+    def displacement_scale_factor(self):
+        """Factor to scale displacements by when added to the reference frame."""
+        return self._displacement_scale_factor
+
+    @displacement_scale_factor.setter
+    def displacement_scale_factor(self, value: float):
+        # Update the internal displacement scale factor attribute and then trigger
+        # a re-read of the current frame to reconstruct the coordinates so that
+        # they account for the newly updated scale factor.
+        self._displacement_scale_factor = value
+        self._sub_generator_1.displacement_scale_factor = value
+        self._sub_generator_2.displacement_scale_factor = value
+        self._read_frame(self.ts.frame)
+
+    def _read_frame(self, frame: int) -> Timestep:
+        """Read the specified frame.
+
+        This method will move the trajectory generator object to a specific frame
+        in the simulation. The data will be loaded into the trajectory generator's
+        `Timestep` entity, which will then be returned.
+
+        Arguments:
+            frame: index of the frame to be read.
+
+        Returns:
+            timestep: a `Timestep` entity containing the requested frame data.
+        """
+        # Set the `frame` index attribute of the `Timestep` entity to the
+        # specified frame number.
+        self.ts.frame = frame
+
+        # Get the time steps from the sub-generators
+        ts_sub_1 = self._sub_generator_1.read_frame(frame)
+        ts_sub_2 = self._sub_generator_2.read_frame(frame)
+
+        if self._offset is not None:
+            ts_sub_2.positions += self._offset
+
+        self.ts.positions = np.concatenate((ts_sub_1.positions, ts_sub_2.positions))
+        self.ts.time = ts_sub_1.time
+
+        return self.ts
+
+    def _read_next_timestep(self, ts: Optional[Timestep] = None) -> Timestep:
+        """Read the next frame in the trajectory.
+
+        This method loads the data at in the next frame into the `Timestep`
+        entity provided via the ``ts`` argument. If no time step entity is
+        provided, then the instance's internal time step entity is used.
+
+        Arguments:
+            ts: optionally, a `Timestep` entity may be provided into which the
+                frame data will be stored. If not specified then the frame data
+                will be stored into the class instance's own time step entity.
+                Note that this argument is currently **not** supported.
+
+        Returns:
+              timestep: a `Timestep` entity containing the next frame's data.
+        """
+        if ts is not None:
+            raise NotImplemented(
+                "Loading the next frame into a new `Timestep` entity is not "
+                "supported.")
+
+        return self._read_frame(self.ts.frame + 1)
+
+    def get_displacements(self, index: Optional[int] = None):
+        """Get the displacement vectors at the requested index.
+
+        This method returns the displacement vectors for the tracked atoms at
+        the specified frame.
+
+        Arguments:
+            index: index for the frame at which the displacements at to be
+                returned. If no index is provided, then the index of the
+                current frame will be used.
+
+        Returns:
+             displacement_vectors: the displacement vectors of the tracked atoms
+                at the specified frame.
+
+        Notes:
+            Displacement vectors will only be returned for the tracked atoms.
+            Furthermore, displacement vectors that fall outside the confidence
+            level, as specified by `confidence_level`, will be zeroed out.
+        """
+        return np.concatenate((self._sub_generator_1.get_displacements(index),
+                               self._sub_generator_2.get_displacements(index)))
+
+    def get_displacement_norms(self, index: Optional[int] = None):
+        """Get the displacement vector norms at the requested index.
+
+        This method returns the displacement vector norms for the tracked atoms
+        at the specified frame.
+
+        Arguments:
+            index: index for the frame at which the displacements at to be
+                returned. If no index is provided, then the index of the
+                current frame will be used.
+
+        Returns:
+             displacement_vector_norms: the displacement vector norms of the
+                tracked atoms at the specified frame.
+
+        Notes:
+            Displacement vector norms will only be returned for the tracked
+            atoms. Furthermore, displacement vector norms that fall outside the
+            confidence level, as specified by `confidence_level`, will be
+            zeroed out.
+        """
+        return np.concatenate((self._sub_generator_1.get_displacement_norms(index),
+                               self._sub_generator_2.get_displacement_norms(index)))
+
+    def _reopen(self):
+        # The act of "reopening" a file does not exactly make much sense in
+        # the context of an HDF5 file as it is not being iterated through
+        # line by line like traditional fixed-format files might. Thus, this
+        # method will just reset the trajectory to the first frame.
+        self.ts.frame = 0
+        self._sub_generator_1.ts.frame = 0
+        self._sub_generator_2.ts.frame = 0
+
+    @property
+    def minimum_displacement_distance(self) -> float:
+        """Minimum displacement distance found in the trajectory."""
+        return min(
+            self._sub_generator_1.minimum_displacement_distance,
+            self._sub_generator_2.minimum_displacement_distance)
+
+    @property
+    def maximum_displacement_distance(self) -> float:
+        """Maximum displacement distance found in the trajectory."""
+        return max(
+            self._sub_generator_1.maximum_displacement_distance,
+            self._sub_generator_2.maximum_displacement_distance)
+
+

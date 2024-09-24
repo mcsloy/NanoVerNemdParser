@@ -4,15 +4,17 @@ import numpy as np
 from concurrent import futures
 from threading import RLock
 from matplotlib import colormaps
+from MDAnalysis import Universe
 
 from nanover.app import NanoverFrameApplication
+from nanover.app import NanoverImdClient
 from nanover.mdanalysis import mdanalysis_to_frame_data
 from nanover.omni.record import record_from_server
 from nanover.trajectory import FrameData
 from nanover.trajectory.frame_server import \
     PLAY_COMMAND_KEY, RESET_COMMAND_KEY, STEP_COMMAND_KEY, PAUSE_COMMAND_KEY, STEP_BACK_COMMAND_KEY
 
-from generators import SimpleGenerator
+from .generators import DNemdTrajectoryGenerator
 
 
 class TrajectoryPlayback:
@@ -57,16 +59,25 @@ class TrajectoryPlayback:
             the associated NanoVer session should be stored. If no file path
             is provided, then no recording will be made. This will default to
             `None`, i.e. no recording.
+        alpha: Transparency override value. By default, both colour & transparency
+            are controlled by the supplied colour map. Most matplotlib colour maps,
+            however, are fully opaque. If an alpha value is specified, it will
+            globally override the transparency set by the gradient. For example,
+            setting ``alpha=0.5`` will render the structure at 50% transparency.
+            This is useful for improving clarity in dense systems or when multiple
+            molecules are overlaid. The default value is `None`, meaning the
+            transparency from the colour map will be used.
     """
 
     def __init__(
-            self, universe, frame_server=None, fps=60,
+            self, universe: Universe, frame_server=None, fps: int = 60,
             colour_metric_normalisation_min: float = 0.0,
             colour_metric_normalisation_max: float = 1.0,
             colour_metric_normalisation_power: float = 1.0,
             residue_scale_from: float = 1.0,
             residue_scale_to: float = 5.0,
             colour_map_name: Optional[str] = "viridis",
+            alpha: Optional[float] = None,
             record_to_file: Optional[str] = None):
         """Initialises the TrajectoryPlayback object.
 
@@ -74,32 +85,40 @@ class TrajectoryPlayback:
         for playback.
 
         Arguments:
-        universe: The MDAnalysis universe object containing the trajectory data.
-        frame_server: The NanoVer frame server to send frame data to. If None, a new
-            server is created.
-        fps: The number of frames per second for the trajectory playback.
-        colour_metric_normalisation_min: Minimum value for the normalisation
-            of the color metric.
-        colour_metric_normalisation_max: Maximum value for the normalisation
-            of the color metric.
-        colour_metric_normalisation_power: Power used for non-linear
-            normalisation of the color metric.
-        residue_scale_from: The size of each residue will be scaled by a value
-            between ``residue_scale_from`` and ``residue_scale_to`` depending
-            on the normalised displacement metric. The ``residue_scale_from``
-            attribute specifies the minimum scaling bounds. A value of one
-            here would indicate that residues with no displacement will have
-            an "unmodified" size.
-        residue_scale_to: The maximum size to which residues may be scaled.
-        colour_map_name: The name of a MatPlotLib gradient to use when colouring
-            the residues. Available colour maps are listed in the dictionary
-            `matplotlib.colormaps`. For more information on available colour
-            maps see matplotlib.org/stable/users/explain/colors/colormaps.html.
-            This will default to `"viridis"`.
-        record_to_file: File path specifying the location at which a cording of
-            the associated NanoVer session should be stored. If no file path
-            is provided, then no recording will be made. This will default to
-            `None`, i.e. no recording.
+            universe: The MDAnalysis universe object containing the trajectory data.
+            frame_server: The NanoVer frame server to send frame data to. If None, a new
+                server is created.
+            fps: The number of frames per second for the trajectory playback.
+            colour_metric_normalisation_min: Minimum value for the normalisation
+                of the color metric.
+            colour_metric_normalisation_max: Maximum value for the normalisation
+                of the color metric.
+            colour_metric_normalisation_power: Power used for non-linear
+                normalisation of the color metric.
+            residue_scale_from: The size of each residue will be scaled by a value
+                between ``residue_scale_from`` and ``residue_scale_to`` depending
+                on the normalised displacement metric. The ``residue_scale_from``
+                attribute specifies the minimum scaling bounds. A value of one
+                here would indicate that residues with no displacement will have
+                an "unmodified" size.
+            residue_scale_to: The maximum size to which residues may be scaled.
+            colour_map_name: The name of a MatPlotLib gradient to use when colouring
+                the residues. Available colour maps are listed in the dictionary
+                `matplotlib.colormaps`. For more information on available colour
+                maps see matplotlib.org/stable/users/explain/colors/colormaps.html.
+                This will default to `"viridis"`.
+            alpha: Overrides the transparency value. By default, both colour and
+                transparency are controlled by the supplied colour map. Most
+                matplotlib colour maps, however, are fully opaque. If an alpha value
+                is specified, it will globally override the transparency set by the
+                gradient. For example, setting ``alpha=0.5`` will render the structure
+                at 50% transparency. This is useful for improving clarity in dense
+                systems or when multiple molecules are overlaid. The default value
+                is `None`, meaning the transparency from the colour map will be used.
+            record_to_file: File path specifying the location at which a cording of
+                the associated NanoVer session should be stored. If no file path
+                is provided, then no recording will be made. This will default to
+                `None`, i.e. no recording.
         """
         self.universe = universe
 
@@ -126,24 +145,39 @@ class TrajectoryPlayback:
         self.colour_metric_normalisation_power = colour_metric_normalisation_power
 
         self._colour_map_name = colour_map_name
+        self._alpha = alpha
 
         self._residue_scale_from = residue_scale_from
         self._residue_scale_to = residue_scale_to
 
         self._send_meta_data = True
 
+        self._record_to_file = record_to_file
+
+        self.__root_selection = None
+        self.__client = None
+
+        if record_to_file:
+            self.record()
+
         if colour_map_name and colour_map_name not in colormaps:
             raise KeyError(
                 f"The supplied name \"{colour_map_name}\" does not correspond "
                 f"to a valid matplotlib colour map.")
 
-        self._record_to_file = record_to_file
-
-        if record_to_file:
-            self.record()
-
-        if not isinstance(universe.trajectory, SimpleGenerator):
+        if not isinstance(universe.trajectory, DNemdTrajectoryGenerator):
             raise TypeError("Trajectory object must be a `SimpleGenerator` instance.")
+
+        # Ensure that the alpha value is a known good type.
+        if not isinstance(alpha, (float, type(None))):
+            raise TypeError(
+                f"The alpha value may be a float or `None`, but \"{alpha}\" was provided.")
+
+        # If a float value is provided then confirm that it is within bounds.
+        if isinstance(alpha, float) and not (0.0 <= alpha <= 1.0):
+            raise ValueError(
+                f"Provided alpha value, {alpha}, is out of bounds; permitted domain [0, 1]")
+
 
     @property
     def displacement_scale_factor(self) -> float:
@@ -186,6 +220,26 @@ class TrajectoryPlayback:
         self._colour_map_name = name
         self._update_meta_data()
 
+    @property
+    def alpha(self):
+        """Global transparency override value."""
+        return self._alpha
+
+    @alpha.setter
+    def alpha(self, value: float | None):
+        # Ensure that the alpha value is a known good type.
+        if not isinstance(value, (float, type(None))):
+            raise TypeError(
+                f"The alpha value may be a float or `None`, but \"{value}\" was provided.")
+
+        # If a float value is provided then confirm that it is within bounds.
+        if isinstance(value, float) and not (0.0 <= value <= 1.0):
+            raise ValueError(
+                f"Provided alpha value, {value}, is out of bounds; permitted domain [0, 1]")
+
+        # If everything is good, then set the alpha value.
+        self._alpha = value
+        self._update_meta_data()
     @property
     def record_to_file(self) -> str:
         return self._record_to_file
@@ -314,9 +368,9 @@ class TrajectoryPlayback:
 
         index = self.frame_index
 
-        trajectory: SimpleGenerator = self.universe.trajectory
+        trajectory: DNemdTrajectoryGenerator = self.universe.trajectory
 
-        if not isinstance(trajectory, SimpleGenerator):
+        if not isinstance(trajectory, DNemdTrajectoryGenerator):
             raise TypeError("Trajectory object must be a `SimpleGenerator` instance.")
 
         # Send the particle positions of the given trajectory index.
@@ -362,7 +416,28 @@ class TrajectoryPlayback:
         if self.colour_map_name:
             colour_map = colormaps[self._colour_map_name]
             colour_map_array = np.array([i for j in range(8) for i in colour_map(j/7)])
+            if self._alpha is not None:
+                for i in range(3, len(colour_map_array), 4):
+                    colour_map_array[i] = self._alpha
             frame.arrays.set("residue.colour_gradient", colour_map_array)
+
+    def set_global_renderer(self, renderer: str):
+        """Apply renderer to root selection.
+
+        This method will apply the specified renderer to the root selection,
+        i.e. all atoms in the system.
+
+        Arguments:
+            renderer: Name of the renderer to be applied to the root selection.
+        """
+        if self.__client is None:
+            self.__client = NanoverImdClient.autoconnect()
+            self.__client.subscribe_multiplayer()
+            self.__client.subscribe_to_frames()
+            self.__root_selection = self.__client.root_selection
+
+        self.__root_selection.renderer = renderer
+        self.__root_selection.flush_changes()
 
     def record(self):
         # Note, using "localhost" will not necessarily continue to work when
