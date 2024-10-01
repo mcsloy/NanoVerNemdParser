@@ -110,7 +110,17 @@ with h5py.File(path_to_hdf5_file, "w") as file:
 Furthermore, the `write` method may be used to create a new HDF5 file and store the associated `DisplacementFrames` instance within it at the root node. Note that these serialisation methods are not compatible with memory-mapped `DisplacementFrames` instances. For users wishing to modify data while in memory mapped mode, they need only open the associated HDF5 file in `r+` mode.
 
 ### Miscellaneous
-Files written in the now deprecated column-based structured file format following the "`average_xyz_displacement_<TIME>ps`" naming scheme may be converted to their HDF5 equivalent using the `dnemd.parsing.schema._convert_old_files` method.
+Files written in the now deprecated column-based structured file format following the "`average_xyz_displacement_<TIME>ps`" naming scheme may be converted to their HDF5 equivalent using the `dnemd.parsing.schema._convert_old_files` method. This is demonstrated below:
+```python
+from dnemd.parsing.schema import _convert_old_files
+directory_path = r"path/to/reference/old_displacement_file_directory"
+structure_file_path = r"path/to/reference/structure/file.pdb"
+displacement_frames = _convert_old_files(directory_path, structure_file_path)
+displacement_frames.write("new_file_name.h5")
+```
+Note that if file names do not match the original `"average_xyz_displacement_*ps"` naming convention, then a new regex pattern must be specified via the optional `pattern` argument.
+
+
 
 # Visualisation
 The `nanover_single_system_run.py` file, located in the examples directory of this repository, contains the code required to visualise D-NEMD data using NanoVer in a self-describing format. It is the recommended starting point for users looking to visualise D-NEMD data with NanoVer. The rest of this section is devoted to explaining the various components of the `dnemd` package that form the foundational boilerplate code enabling these examples.

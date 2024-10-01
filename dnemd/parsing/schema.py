@@ -203,16 +203,16 @@ class DisplacementFrames:
                 "`reference_structure_positions` arrays.")
 
         # Varify that the arrays are of the correct length
-        n = atomic_indices.shape[0]
+        m = atomic_indices.shape[0]
+        n = len(frame_times)
         check = self.__check_shape
-        check(n, displacement_vectors, "displacement_vectors")
-        check(n, standard_error_1_norms, "standard_error_1_norms")
-        check(n, sample_sizes, "sample_sizes")
-        check(n, standard_error_1_vectors, "standard_error_1_vectors")
-        check(n, standard_error_1_norms, "standard_error_1_norms")
-        check(n, standard_error_2_vectors, "standard_error_2_vectors")
-        check(n, standard_error_2_norms, "standard_error_2_norms")
-        check(n, frame_times, "standard_error_2_norms")
+        check(n, m, displacement_vectors, "displacement_vectors")
+        check(n, m, standard_error_1_norms, "standard_error_1_norms")
+        check(n, m, sample_sizes, "sample_sizes")
+        check(n, m, standard_error_1_vectors, "standard_error_1_vectors")
+        check(n, m, standard_error_1_norms, "standard_error_1_norms")
+        check(n, m, standard_error_2_vectors, "standard_error_2_vectors")
+        check(n, m, standard_error_2_norms, "standard_error_2_norms")
 
         # Ensure that the frame times array is ordered & contains no duplicates
         if not all(frame_times[:-1] < frame_times[1:]):
@@ -220,9 +220,9 @@ class DisplacementFrames:
                 "The `frame_times` array must be ordered & contain no duplicates.")
 
     @staticmethod
-    def __check_shape(n, array, name):
-        expected_shape = (n, *array.shape[1:])
-        if array.shape[0] != n:
+    def __check_shape(n, m, array, name):
+        expected_shape = (n, m, *array.shape[2:])
+        if array.shape[0] != n or array.shape[1] != m:
             raise IndexError(
                 f"Shape mismatch detected in array `{name}`; "
                 f"expected {expected_shape}, but found {array.shape}.")
