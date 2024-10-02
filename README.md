@@ -130,8 +130,9 @@ The `TrajectoryPlayback` class is responsible for managing the playback of D-NEM
 
 Trajectory generators in `MDAnalysis.Universe` instances are crucial for reading molecular dynamics trajectories from diverse file formats. These generators are generally based on the `ReaderBase` class, providing a standard interface for accessing trajectory data. Different trajectory generators are employed by MDAnalysis to accommodate the specific requirements of each file format. Consequently, the introduction of a new file format necessitates the creation of a custom trajectory generator (`SimpleDNemdGenerator`) to ensure proper data handling. Thus, the minimum viable code necessary to playback D-NEMD data using NanoVer is as follows:
 ```python
-from MDAnalysis import Universe  
-from dnemd.nanover.nemd_playback import TrajectoryPlayback  
+from MDAnalysis import Universe
+from dnemd.nanover.generators import SimpleDNemdGenerator
+from dnemd.nanover.nemd_playback import TrajectoryPlayback
 # Instantiate a `Universe` instance representing the base structure, using a reference file
 universe = Universe("path/to/reference/structure/file.pdb")
 # Create a generator that can produce trajectory frames from the D-NEMD data
@@ -155,10 +156,11 @@ To visually highlight areas of high activity, each residue within the protein ca
 
 #### Colour
 To control the colouring of residues, a Matplotlib colour map must be specified using the `colour_map_name` parameter. This defines the gradient used to map displacement magnitudes to colours, with common options like 'viridis' or 'plasma'. The displacement values are normalised between `colour_metric_normalisation_min` and `colour_metric_normalisation_max`, which set the range for the mapping. Residues with displacement values at or below the minimum are coloured using the start of the gradient, while those with displacements at or above the maximum take the final colour in the gradient. An example showing how per-residue colouring can be configured is provided below:
+
 ```python
-trajectory_player.set_global_renderer("cartoon extended")  
-trajectory_player.colour_metric_normalisation_min = trajectory.minimum_displacement_distance  
-trajectory_player.colour_metric_normalisation_max = trajectory.maximum_displacement_distance  
+trajectory_player.set_global_renderer("cartoon extended")
+trajectory_player.displacement_normalisation_lower_bound = trajectory.minimum_displacement_distance
+trajectory_player.displacement_normalisation_upper_bound = trajectory.maximum_displacement_distance
 trajectory_player.colour_map_name = "viridis"
 ```
 Additional settings, such as `colour_metric_normalisation_power`, can be used to apply a non-linear transformation to the normalisation process, making differences in lower or higher displacement ranges more or less pronounced. Together, these parameters offer fine control over how displacement data is visually represented through residue colour. The `TrajectoryPlayback` class's `minimum_displacement_distance` and `maximum_displacement_distance` properties can be useful for helping to set up the correct normalisation bounds. While these settings may be configured at runtime, they may also be provided as arguments to the `TrajectoryPlayback` class constructor.
@@ -168,10 +170,11 @@ The `"cartoon extended"` renderer will respect alpha transparency values produce
 #### Scale
 Residue scaling allows the size of each residue to be adjusted based on its displacement, making regions of higher activity visually larger. The scaling is controlled by two parameters: `residue_scale_from` and `residue_scale_to`. These define the range within which the size of the residues will vary. A residue with minimal displacement will be scaled to the value specified by `residue_scale_from` (usually set to 1.0 for no scaling), while residues with the highest displacements will be scaled up to `residue_scale_to`.
 
-The displacement values are normalised based on the same range used for colouring, ensuring consistency between visual effects. This scaling can emphasise areas of significant motion, drawing attention to regions of interest within the molecular structure. By adjusting the scaling range, users can increase or decrease the visual prominence of displacements. Only to settings need to be set to enable this feature:
+The displacement values are normalised based on the same range used for colouring, ensuring consistency between visual effects. This scaling can emphasise areas of significant motion, drawing attention to regions of interest within the molecular structure. By adjusting the scaling range, users can increase or decrease the visual prominence of displacements. Only two settings need to be set to enable this feature:
+
 ```python
-trajectory_player.residue_scale_from = 1.0  
-trajectory_player.residue_scale_to = 4.0
+trajectory_player.residue_scale_minimum = 1.0
+trajectory_player.residue_scale_maximum = 4.0
 ```
 
 ## Twinned Playback

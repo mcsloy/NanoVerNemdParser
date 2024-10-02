@@ -75,27 +75,27 @@ if __name__ == "__main__":
     # the minimum and maximum displacements. It is important to note that the
     # displacement values used for sampling the colour map do not include the
     # `displacement_scale_factor`. That is to say if the maximum displacement
-    # present is 0.8 then `colour_metric_normalisation_max` should be set to
+    # present is 0.8 then `displacement_normalisation_upper_bound` should be set to
     # `0.8` and not `0.8 * displacement_scale_factor`. If These values are not
-    # assigned then an estimation will be made later on in this script.
-    colour_metric_normalisation_min = None
-    colour_metric_normalisation_max = None
+    # assigned then they will default to the min and max values.
+    displacement_normalisation_lower_bound = None
+    displacement_normalisation_upper_bound = None
 
     # The metric used for colouring the residues may also be utilised to adjust their
     # scale, making displacements more noticeable. The size of each residue is determined
     # by standard linear interpolation using the formula `l + (u - l) * x`, where `l`
-    # and `u` are the lower and upper bounds as defined by `residue_scale_from` and
-    # `residue_scale_to`, respectively. The value `x` is the same normalised metric
+    # and `u` are the lower and upper bounds as defined by `residue_scale_minimum` and
+    # `residue_scale_maximum`, respectively. The value `x` is the same normalised metric
     # produced during colour mapping. The final formula is:
-    #   `residue_scale_from + (residue_scale_to - residue_scale_from) *
-    #   (displacement - colour_metric_normalisation_min) /
-    #   (colour_metric_normalisation_max - colour_metric_normalisation_min)`
+    #   `residue_scale_minimum + (residue_scale_maximum - residue_scale_minimum) *
+    #   (displacement - displacement_normalisation_lower_bound) /
+    #   (displacement_normalisation_upper_bound - displacement_normalisation_lower_bound)`
     #
-    # It is recommended to keep `residue_scale_from` at `1.0`. To make scaling re
-    # pronounced, increase the `residue_scale_to` setting. Per-residue scaling can
-    # be disabled by setting `residue_scale_to` to `1.0`.
-    residue_scale_from = 1.0
-    residue_scale_to = 4.0
+    # It is recommended to keep `residue_scale_minimum` at `1.0`. To make scaling re
+    # pronounced, increase the `residue_scale_maximum` setting. Per-residue scaling can
+    # be disabled by setting `residue_scale_maximum` to `1.0`.
+    residue_scale_minimum = 1.0
+    residue_scale_maximum = 4.0
 
     # The NanoVer session will not be recorded unless a file name is provided to
     # the `TrajectoryPlayback` instance. By default, no recording is made. If a
@@ -119,13 +119,6 @@ if __name__ == "__main__":
     trajectory = SimpleDNemdGenerator(displacement_file)
     universe.trajectory = trajectory
 
-    # If not scaling bounds were supplied then just set them to the maximum and
-    # minimum displacement values.
-    if not colour_metric_normalisation_min:
-        colour_metric_normalisation_min = trajectory.minimum_displacement_distance
-    if not colour_metric_normalisation_max:
-        colour_metric_normalisation_max = trajectory.maximum_displacement_distance
-
     # ╔════════════════════╗
     # ║      Playback      ║
     # ╚════════════════════╝
@@ -133,15 +126,14 @@ if __name__ == "__main__":
     # Construct the trajectory playback entity
     trajectory_player = TrajectoryPlayback(
         universe, fps=fps,
-        colour_metric_normalisation_min=colour_metric_normalisation_min,
-        colour_metric_normalisation_max=colour_metric_normalisation_max,
-        residue_scale_from=residue_scale_from,
-        residue_scale_to=residue_scale_to,
+        displacement_normalisation_lower_bound=displacement_normalisation_lower_bound,
+        displacement_normalisation_upper_bound=displacement_normalisation_upper_bound,
+        residue_scale_minimum=residue_scale_minimum,
+        residue_scale_maximum=residue_scale_maximum,
         colour_map_name=colour_map_name,
         record_to_file=record_to_file)
 
-    # Publish the topology data
-    trajectory_player.send_topology_frame()
+
     # Initiate playback
     trajectory_player.play()
 

@@ -35,21 +35,21 @@ class TrajectoryPlayback:
         frame_server: The NanoVer frame server to send frame data to. If None, a new
             server is created.
         fps: The number of frames per second for the trajectory playback.
-        colour_metric_normalisation_min: Minimum value for the normalisation
-            of the color metric.
-        colour_metric_normalisation_max: Maximum value for the normalisation
-            of the color metric.
-        colour_metric_normalisation_power: Power used for non-linear
-            normalisation of the color metric.
+        displacement_normalisation_lower_bound: Minimum value for the normalisation
+            of the displacement metric. See the notes section for more information.
+        displacement_normalisation_upper_bound: Maximum value for the normalisation
+            of the displacement metric.
+        displacement_normalisation_exponent: Power used for non-linear
+            normalisation of the displacement metric.
 
     Properties:
-        residue_scale_from: The size of each residue will be scaled by a value
-            between ``residue_scale_from`` and ``residue_scale_to`` depending
-            on the normalised displacement metric. The ``residue_scale_from``
+        residue_scale_minimum: The size of each residue will be scaled by a value
+            between ``residue_scale_minimum`` and ``residue_scale_maximum`` depending
+            on the normalised displacement metric. The ``residue_scale_minimum``
             attribute specifies the minimum scaling bounds. A value of one
             here would indicate that residues with no displacement will have
             an "unmodified" size.
-        residue_scale_to: The maximum size to which residues may be scaled.
+        residue_scale_maximum: The maximum size to which residues may be scaled.
         colour_map_name: The name of a MatPlotLib gradient to use when colouring
             the residues. Available colour maps are listed in the dictionary
             `matplotlib.colormaps`. For more information on available colour
@@ -67,15 +67,29 @@ class TrajectoryPlayback:
             This is useful for improving clarity in dense systems or when multiple
             molecules are overlaid. The default value is `None`, meaning the
             transparency from the colour map will be used.
+
+
+    Notes:
+        During playback, residue displacement distances are normalised to the range [0, 1],
+        producing a *normalised displacement metric*. This metric controls visual
+        properties such as residue colour and size. Residues with smaller displacements
+        will be assigned the visual attributes associated with the lower bound (e.g.
+        default size and colour), while residues with larger displacements will scale up
+        accordingly, reflecting their higher displacement.  The bounds for this
+        normalisation are determined by `displacement_normalisation_lower_bound` and
+        `displacement_normalisation_upper_bound`, which are typically set to the minimum
+        and maximum displacement distances, respectively. Furthermore, the
+        `displacement_normalisation_exponent` can be used to add a degree of non-linearity
+        to the normalised displacement metric.
     """
 
     def __init__(
             self, universe: Universe, frame_server=None, fps: int = 60,
-            colour_metric_normalisation_min: float = 0.0,
-            colour_metric_normalisation_max: float = 1.0,
-            colour_metric_normalisation_power: float = 1.0,
-            residue_scale_from: float = 1.0,
-            residue_scale_to: float = 5.0,
+            displacement_normalisation_lower_bound: Optional[float] = None,
+            displacement_normalisation_upper_bound: Optional[float] = None,
+            displacement_normalisation_exponent: float = 1.0,
+            residue_scale_minimum: float = 1.0,
+            residue_scale_maximum: float = 5.0,
             colour_map_name: Optional[str] = "viridis",
             alpha: Optional[float] = None,
             record_to_file: Optional[str] = None):
@@ -89,19 +103,21 @@ class TrajectoryPlayback:
             frame_server: The NanoVer frame server to send frame data to. If None, a new
                 server is created.
             fps: The number of frames per second for the trajectory playback.
-            colour_metric_normalisation_min: Minimum value for the normalisation
-                of the color metric.
-            colour_metric_normalisation_max: Maximum value for the normalisation
-                of the color metric.
-            colour_metric_normalisation_power: Power used for non-linear
-                normalisation of the color metric.
-            residue_scale_from: The size of each residue will be scaled by a value
-                between ``residue_scale_from`` and ``residue_scale_to`` depending
-                on the normalised displacement metric. The ``residue_scale_from``
+            displacement_normalisation_lower_bound: Minimum value for the normalisation
+                of the displacement metric. If no lower bound is specified then it will
+                default to the minimum displacement.
+            displacement_normalisation_upper_bound: Maximum value for the normalisation
+                of the displacement metric. If no upper bound is specified then it will
+                default to the maximum displacement.
+            displacement_normalisation_exponent: Power used for non-linear
+                normalisation of the displacement metric.
+            residue_scale_minimum: The size of each residue will be scaled by a value
+                between ``residue_scale_minimum`` and ``residue_scale_maximum`` depending
+                on the normalised displacement metric. The ``residue_scale_minimum``
                 attribute specifies the minimum scaling bounds. A value of one
                 here would indicate that residues with no displacement will have
                 an "unmodified" size.
-            residue_scale_to: The maximum size to which residues may be scaled.
+            residue_scale_maximum: The maximum size to which residues may be scaled.
             colour_map_name: The name of a MatPlotLib gradient to use when colouring
                 the residues. Available colour maps are listed in the dictionary
                 `matplotlib.colormaps`. For more information on available colour
@@ -119,8 +135,24 @@ class TrajectoryPlayback:
                 the associated NanoVer session should be stored. If no file path
                 is provided, then no recording will be made. This will default to
                 `None`, i.e. no recording.
+
+        Notes:
+            During playback, residue displacement distances are normalised to the range [0, 1],
+            producing a *normalised displacement metric*. This metric controls visual
+            properties such as residue colour and size. Residues with smaller displacements
+            will be assigned the visual attributes associated with the lower bound (e.g.
+            default size and colour), while residues with larger displacements will scale up
+            accordingly, reflecting their higher displacement.  The bounds for this
+            normalisation are determined by `displacement_normalisation_lower_bound` and
+            `displacement_normalisation_upper_bound`, which are typically set to the minimum
+            and maximum displacement distances, respectively. Furthermore, the
+            `displacement_normalisation_exponent` can be used to add a degree of non-linearity
+            to the normalised displacement metric.
+
         """
         self.universe = universe
+
+        self.frame_server = frame_server
 
         if frame_server is None:
             self.frame_server = NanoverFrameApplication.basic_server(port=0)
@@ -140,17 +172,22 @@ class TrajectoryPlayback:
 
         _ = universe.universe.trajectory[0]
 
-        self.colour_metric_normalisation_min = colour_metric_normalisation_min
-        self.colour_metric_normalisation_max = colour_metric_normalisation_max
-        self.colour_metric_normalisation_power = colour_metric_normalisation_power
+        # If no bounds are provided then they will be set to the min/max displacement by the
+        # `send_frame` method.
+        self.displacement_normalisation_lower_bound = displacement_normalisation_lower_bound
+        self.displacement_normalisation_upper_bound = displacement_normalisation_upper_bound
+        self.displacement_normalisation_exponent = displacement_normalisation_exponent
 
         self._colour_map_name = colour_map_name
         self._alpha = alpha
 
-        self._residue_scale_from = residue_scale_from
-        self._residue_scale_to = residue_scale_to
+        self._residue_scale_minimum = residue_scale_minimum
+        self._residue_scale_maximum = residue_scale_maximum
 
         self._send_meta_data = True
+
+        # Used to track if topology has been sent at the start of the simulation
+        self.__initial_topology_has_been_sent = False
 
         self._record_to_file = record_to_file
 
@@ -190,21 +227,21 @@ class TrajectoryPlayback:
             self.send_frame()
 
     @property
-    def residue_scale_from(self) -> float:
-        return self._residue_scale_from
+    def residue_scale_minimum(self) -> float:
+        return self._residue_scale_minimum
 
-    @residue_scale_from.setter
-    def residue_scale_from(self, value: float):
-        self._residue_scale_from = value
+    @residue_scale_minimum.setter
+    def residue_scale_minimum(self, value: float):
+        self._residue_scale_minimum = value
         self._update_meta_data()
 
     @property
-    def residue_scale_to(self) -> float:
-        return self._residue_scale_to
+    def residue_scale_maximum(self) -> float:
+        return self._residue_scale_maximum
 
-    @residue_scale_to.setter
-    def residue_scale_to(self, value: float):
-        self._residue_scale_to = value
+    @residue_scale_maximum.setter
+    def residue_scale_maximum(self, value: float):
+        self._residue_scale_maximum = value
         self._update_meta_data()
 
     @property
@@ -240,6 +277,7 @@ class TrajectoryPlayback:
         # If everything is good, then set the alpha value.
         self._alpha = value
         self._update_meta_data()
+
     @property
     def record_to_file(self) -> str:
         return self._record_to_file
@@ -304,8 +342,17 @@ class TrajectoryPlayback:
         Arguments:
             block: A boolean indicating if the playback should block the main thread.
         """
+
+        if self.frame_server is None:
+            self.frame_server = NanoverFrameApplication.basic_server(port=0)
+
         if self.is_running:
             raise RuntimeError("The trajectory is already playing on a thread!")
+
+        if not self.__initial_topology_has_been_sent:
+            self.send_topology_frame()
+            self.__initial_topology_has_been_sent = True
+
         if block:
             self._run()
         else:
@@ -348,6 +395,18 @@ class TrajectoryPlayback:
         """Resets the trajectory playback to the first frame."""
         self.frame_index = 0
 
+    def close(self):
+        """Close down the server."""
+        self.pause()
+        self.cancel_playback(True)
+        self.frame_server.close()
+        self.frame_server = None
+        self.__initial_topology_has_been_sent = False
+        self._send_meta_data = True
+        self.__root_selection = True
+        del self.__client
+        self.__client = None
+
     def send_topology_frame(self):
         """Sends the topology frame to the NanoVer frame server.
 
@@ -381,17 +440,23 @@ class TrajectoryPlayback:
         _ = self.universe.trajectory[index]
         frame = mdanalysis_to_frame_data(self.universe, topology=False, positions=True)
 
+        if self.displacement_normalisation_lower_bound is None:
+            self.displacement_normalisation_lower_bound = trajectory.minimum_displacement_distance
+
+        if self.displacement_normalisation_upper_bound is None:
+            self.displacement_normalisation_upper_bound = trajectory.maximum_displacement_distance
+
         norm_displacements = self.exponential_normalisation(
             trajectory.get_displacement_norms(),
-            self.colour_metric_normalisation_min,
-            self.colour_metric_normalisation_max,
-            self.colour_metric_normalisation_power)
+            self.displacement_normalisation_lower_bound,
+            self.displacement_normalisation_upper_bound,
+            self.displacement_normalisation_exponent)
 
         frame.arrays.set("residue.normalised_metric_c", norm_displacements)
 
         if self._send_meta_data:
-            frame.values.set("residue.scale_from", self.residue_scale_from)
-            frame.values.set("residue.scale_to", self.residue_scale_to)
+            frame.values.set("residue.scale_from", self.residue_scale_minimum)
+            frame.values.set("residue.scale_to", self.residue_scale_maximum)
             self._add_matplotlib_gradient_to_frame(frame)
             self._send_meta_data = False
 
@@ -430,6 +495,12 @@ class TrajectoryPlayback:
         Arguments:
             renderer: Name of the renderer to be applied to the root selection.
         """
+
+        # Ensure that a frame server exists, otherwise setting the renderer via this
+        # method has no meaning.
+        if self.frame_server is None:
+            self.frame_server = NanoverFrameApplication.basic_server(port=0)
+
         if self.__client is None:
             self.__client = NanoverImdClient.autoconnect()
             self.__client.subscribe_multiplayer()
