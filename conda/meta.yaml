@@ -1,0 +1,37 @@
+{% set version = environ.get('PACKAGE_VERSION', '0.0.1') %}
+
+package:
+  name: dnemd
+  version: {{ version }}
+
+source:
+  path: ..
+
+build:
+  noarch: python
+  number: 0
+  script: "{{ PYTHON }} -m pip install . --no-deps -vv"
+
+requirements:
+  build:
+    - python >=3.10
+    - pip
+    - setuptools
+  run:
+    - python >=3.10
+    - h5py
+    - numpy
+    - matplotlib
+    - packaging
+    - nanover-server
+    - mdanalysis
+
+extra:
+  channels:
+    - irl
+    - conda-forge
+
+about:
+  home: https://github.com/mcsloy/NanoVerNemdParser
+  summary: "Dynamical Non-Equilibrium Molecular Dynamics (D-NEMD) helper package."
+  license: MIT

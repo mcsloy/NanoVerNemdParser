@@ -1,0 +1,52 @@
+name: Build and Upload Conda Package
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+
+      - name: Install Miniconda
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-update-conda: true
+          python-version: "3.10"
+          activate-environment: build-env
+          miniconda-version: "latest"
+          channels: conda-forge
+          use-only-tar-bz2: true
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install tomli for TOML validation
+        run: |
+          conda install -c conda-forge tomli
+
+      - name: Set version number
+        run: |
+          # Extract version from __init__.py and store in PACKAGE_VERSION
+          PACKAGE_VERSION=$(grep -oP '^__version__\s*=\s*["\x27]\K[0-9]+(\.[0-9]+)*([.-](alpha|beta|rc|dev|post)[0-9]*)?' dnemd/__init__.py)
+          echo "PACKAGE_VERSION=$PACKAGE_VERSION" >> $GITHUB_ENV
+          sed -i "s/PACKAGE_VERSION/$PACKAGE_VERSION/g" pyproject.toml
+          python -c "import tomli; tomli.loads(open('pyproject.toml').read())"
+
+      - name: Install conda-build and anaconda-client
+        run: |
+          conda install -c conda-forge conda-build anaconda-client
+
+      - name: Build the Conda package
+        env:
+          PACKAGE_VERSION: ${{ env.PACKAGE_VERSION }}
+        run: conda build ./conda -c irl -c conda-forge
+
+      - name: Upload the Conda package to Anaconda.org
+        run: |
+          PACKAGE_PATH=$(conda build ./conda --output)
+          anaconda -t ${{ secrets.ANACONDA_TOKEN }} upload $PACKAGE_PATH

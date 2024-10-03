@@ -1,5 +1,8 @@
 # Introduction
-This repository presents a provisional HDF5-based schema for storing and managing results derived from the analysis of Dynamical Non-Equilibrium Molecular Dynamics (D-NEMD) simulations. The schema's specifications are detailed in the *Hierarchical File Format Schema for D-NEMD Results* section of this document, while a Python implementation is available in the accompanying `dnemd` package. The `dnemd` Python package also contains all of the the code necessary to renderer the D-NEMD data using the NanoVer virtual reality visualiser application. The first section of this document is dedicated to the file schema, with the following section detailing the NanoVer related components.
+This repository presents a provisional HDF5-based schema for storing and managing results derived from the analysis of Dynamical Non-Equilibrium Molecular Dynamics (D-NEMD) simulations. The schema's specifications are detailed in the *Hierarchical File Format Schema for D-NEMD Results* section of this document, while a Python implementation is available in the accompanying `dnemd` package. The `dnemd` Python package also contains all of the the code necessary to renderer the D-NEMD data using the NanoVer virtual reality visualiser application. The first section of this document is dedicated to the file schema, with the following section detailing the NanoVer related components. This package can be installed via anaconda using the following command:
+```bash
+conda install -c irl -c conda-forge mcsloy::dnemd
+```
 
 # Hierarchical File Format Schema for D-NEMD Results
 This section outlines a provisional HDF5 based schema for the storage and manipulation of results stemming from the analysis of Dynamical NonEquilibrium Molecular Dynamics (D-NEMD) simulations. 

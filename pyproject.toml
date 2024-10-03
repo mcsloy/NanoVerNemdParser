@@ -1,3 +1,15 @@
 [build-system]
-requires = ["setuptools", "wheel", "h5py", "numpy", "matplotlib", "packaging"]
+requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "dnemd"
+version = "PACKAGE_VERSION"
+description = "Dynamical Non-Equilibrium Molecular Dynamics (D-NEMD) helper package"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Adam McSloy", email = "a.mcsloy@bristol.ac.uk" }]
+dependencies = ["h5py", "numpy", "matplotlib", "packaging"]
+
+[tool.setuptools]
+packages = { find = { exclude = ["conda"] } }
