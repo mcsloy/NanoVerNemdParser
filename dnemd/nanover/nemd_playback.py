@@ -1,8 +1,7 @@
 import time
 from typing import Optional
 import numpy as np
-from concurrent import futures
-from threading import RLock
+from threading import Thread, Event
 from matplotlib import colormaps
 from MDAnalysis import Universe
 
@@ -152,58 +151,48 @@ class TrajectoryPlayback:
         """
         self.universe = universe
 
-        self.frame_server = frame_server
+        # Ensure that the trajectory is pointing at the first frame.
+        _ = universe.universe.trajectory[0]
 
-        if frame_server is None:
-            self.frame_server = NanoverFrameApplication.basic_server(port=0)
-        else:
-            self.frame_server = frame_server
+        self._frame_index = 0
 
-        self.set_up_commands()
+        # Initialise a new frame server as needed
+        self.frame_server = frame_server if frame_server is not None else NanoverFrameApplication.basic_server(port=0)
 
         self.fps = fps
 
-        # Get a pool of threads (just one) that we can run the playback on
-        self.threads = futures.ThreadPoolExecutor(max_workers=1)
-        self._run_task = None
-        self._cancelled = False
-        self._cancel_lock = RLock()
-        self.frame_index = 0
+        # The thread performing the playback loop will be stored under this
+        # attribute whenever it is actively running.
+        self._playback_thread = None
 
-        _ = universe.universe.trajectory[0]
+        # This event is used to signal to the playback thread that it should stop.
+        self.__cancel_event = Event()
 
-        # If no bounds are provided then they will be set to the min/max displacement by the
-        # `send_frame` method.
-        self.displacement_normalisation_lower_bound = displacement_normalisation_lower_bound
-        self.displacement_normalisation_upper_bound = displacement_normalisation_upper_bound
+        # Ensure that a valid type of trajectory generator is being used.
+        if not isinstance(universe.trajectory, DNemdTrajectoryGenerator):
+            raise TypeError("Trajectory object must be a `DNemdTrajectoryGenerator` instance.")
+
+        # If no bounds are provided then they will are set to the minimum and
+        # maximum displacements respectively.
+        self.displacement_normalisation_lower_bound = (
+            displacement_normalisation_lower_bound if displacement_normalisation_lower_bound is not None else
+            universe.trajectory.minimum_displacement_distance)
+
+        self.displacement_normalisation_upper_bound = (
+            displacement_normalisation_upper_bound if displacement_normalisation_upper_bound is not None else
+            universe.trajectory.maximum_displacement_distance)
+
         self.displacement_normalisation_exponent = displacement_normalisation_exponent
-
-        self._colour_map_name = colour_map_name
-        self._alpha = alpha
 
         self._residue_scale_minimum = residue_scale_minimum
         self._residue_scale_maximum = residue_scale_maximum
-
-        self._send_meta_data = True
-
-        # Used to track if topology has been sent at the start of the simulation
-        self.__initial_topology_has_been_sent = False
-
-        self._record_to_file = record_to_file
-
-        self.__root_selection = None
-        self.__client = None
-
-        if record_to_file:
-            self.record()
 
         if colour_map_name and colour_map_name not in colormaps:
             raise KeyError(
                 f"The supplied name \"{colour_map_name}\" does not correspond "
                 f"to a valid matplotlib colour map.")
 
-        if not isinstance(universe.trajectory, DNemdTrajectoryGenerator):
-            raise TypeError("Trajectory object must be a `SimpleGenerator` instance.")
+        self._colour_map_name = colour_map_name
 
         # Ensure that the alpha value is a known good type.
         if not isinstance(alpha, (float, type(None))):
@@ -215,9 +204,48 @@ class TrajectoryPlayback:
             raise ValueError(
                 f"Provided alpha value, {alpha}, is out of bounds; permitted domain [0, 1]")
 
+        self._alpha = alpha
+
+        self._send_meta_data = True  # Send meta-data in the next `send_frame` call?
+        self.__server_has_shutdown = False  # Has the frame-server shutdown?
+
+        self.__root_selection = None
+        self.__client = None
+
+        # Set up NanoVer session recording if necessary.
+        self._record_to_file = record_to_file
+        if record_to_file:
+            # Note, using "localhost" will not necessarily continue to work when
+            # and if server authentication is implemented.
+            record_from_server(
+                f"localhost:{self.frame_server.port}",
+                f"{self._record_to_file}.traj",
+                f"{self._record_to_file}.state")
+
+        # Register the playback control commands with the frame server so that
+        # playback commands received by the server map to the relevant functions
+        # present in this class.
+        self.frame_server.server.register_command(PLAY_COMMAND_KEY, self.play)
+        self.frame_server.server.register_command(PAUSE_COMMAND_KEY, self.pause)
+        self.frame_server.server.register_command(RESET_COMMAND_KEY, self.reset)
+        self.frame_server.server.register_command(STEP_COMMAND_KEY, self.step)
+        self.frame_server.server.register_command(STEP_BACK_COMMAND_KEY, self.step_back)
+
+        # Send the topology data along with first trajectory frame. This is done
+        # so that there is something to see when the frame-server first starts
+        # up. This also gets around the problem where the first frame is skipped
+        # in the `_playback_loop` method.
+        self.send_topology_frame()
+        self.send_frame()
+
+    @property
+    def frame_index(self) -> int:
+        """Index of current trajectory frame."""
+        return self._frame_index
 
     @property
     def displacement_scale_factor(self) -> float:
+        """Displacement scale factor."""
         return self.universe.trajectory.displacement_scale_factor
 
     @displacement_scale_factor.setter
@@ -228,6 +256,7 @@ class TrajectoryPlayback:
 
     @property
     def residue_scale_minimum(self) -> float:
+        """Minimum residue scale factor."""
         return self._residue_scale_minimum
 
     @residue_scale_minimum.setter
@@ -237,6 +266,7 @@ class TrajectoryPlayback:
 
     @property
     def residue_scale_maximum(self) -> float:
+        """Maximum residue scale factor."""
         return self._residue_scale_maximum
 
     @residue_scale_maximum.setter
@@ -246,6 +276,7 @@ class TrajectoryPlayback:
 
     @property
     def colour_map_name(self) -> str:
+        """Colour map name."""
         return self._colour_map_name
 
     @colour_map_name.setter
@@ -280,59 +311,65 @@ class TrajectoryPlayback:
 
     @property
     def record_to_file(self) -> str:
+        """Path specifying where playback files will be stored."""
         return self._record_to_file
 
     def _update_meta_data(self):
+        """Resend the current frame with the new meta-data."""
         self._send_meta_data = True
         if not self.is_running:
             self.send_frame()
 
-    def set_up_commands(self):
-        """Register the playback control commands with the frame server.
-
-        This method maps the VR commands for play, pause, reset, and step to the
-        corresponding methods in this class.
-        """
-        self.frame_server.server.register_command(PLAY_COMMAND_KEY, self.play)
-        self.frame_server.server.register_command(PAUSE_COMMAND_KEY, self.pause)
-        self.frame_server.server.register_command(RESET_COMMAND_KEY, self.reset)
-        self.frame_server.server.register_command(STEP_COMMAND_KEY, self.step)
-        self.frame_server.server.register_command(STEP_BACK_COMMAND_KEY, self.step_back)
-
     @property
     def is_running(self):
-        """Boolean indicating if the server is running."""
-        return self._run_task is not None and not (self._run_task.cancelled() or self._run_task.done())
+        """Boolean indicating if the server is actively playing the trajectory."""
+        return self._playback_thread is not None and self._playback_thread.is_alive()
 
     def play(self):
-        """Starts or resumes the trajectory playback.
-
-        Cancels any existing playback and starts a new one.
-        """
-        # First, we have to cancel any existing playback, and start a new one.
-        with self._cancel_lock:
-            self.cancel_playback(wait=True)
-        self.run_playback()
-
-    def step(self):
-        """Advances the trajectory by a single frame and then stops."""
-        # The lock here ensures only one person can cancel at a time.
-        with self._cancel_lock:
-            self.cancel_playback(wait=True)
-            self._step_one_frame()
-
-    def step_back(self):
-        """Steps trajectory back by a single frame and then stops."""
-        # The lock here ensures only one person can cancel at a time.
-        with self._cancel_lock:
-            self.cancel_playback(wait=True)
-            self.frame_index = (self.frame_index - 1) % self.universe.trajectory.n_frames
-            self.send_frame()
+        """Starts or resumes the trajectory playback."""
+        if not self.is_running:
+            self.run_playback()
 
     def pause(self):
         """Pause trajectory playback."""
-        with self._cancel_lock:
-            self.cancel_playback(wait=True)
+
+        # Only attempt to pause/cancel playback if there is something to cancel.
+        if self.is_running:
+            # Set the `__cancel_event` flag so that the `_playback_loop` method
+            # will break out of its while loop.
+            self.__cancel_event.set()
+
+            # Wait for the loop to break, this should be quick.
+            self._playback_thread.join()
+
+            # Reset the `__cancel_event` flag so that the `_playback_loop`
+            # method does not immediately terminate the next time it is called.
+            self.__cancel_event.clear()
+
+            # Now that the playback thread has been terminated the associated
+            # `_playback_thread` attribute may be cleared
+            self._playback_thread = None
+
+    def step(self):
+        """Advances the trajectory by a single frame and then stops."""
+        self.step_to(self._frame_index + 1)
+
+    def step_back(self):
+        """Steps trajectory back by a single frame and then stops."""
+        self.step_to(self._frame_index - 1)
+
+    def step_to(self, frame_index: int):
+        """Steps trajectory to the specified frame and then stops.
+
+        Arguments:
+            frame_index: Index of the frame to go to.
+        """
+        # Halt playback
+        self.pause()
+        # Update the current frame index attribute
+        self._frame_index = frame_index % self.universe.trajectory.n_frames
+        # Send the specified frame.
+        self.send_frame()
 
     def run_playback(self, block=False):
         """Runs the trajectory playback.
@@ -343,69 +380,61 @@ class TrajectoryPlayback:
             block: A boolean indicating if the playback should block the main thread.
         """
 
-        if self.frame_server is None:
-            self.frame_server = NanoverFrameApplication.basic_server(port=0)
-
         if self.is_running:
             raise RuntimeError("The trajectory is already playing on a thread!")
 
-        if not self.__initial_topology_has_been_sent:
-            self.send_topology_frame()
-            self.__initial_topology_has_been_sent = True
+        if self.__server_has_shutdown:
+            raise RuntimeError(
+                "`TrajectoryPlayback` entities cannot be reused following shutdown.")
 
         if block:
-            self._run()
+            self._playback_loop()
         else:
-            self._run_task = self.threads.submit(self._run)
+            self._playback_thread = Thread(target=self._playback_loop)
+            self._playback_thread.start()
 
-    def _run(self):
+    def _playback_loop(self):
         """Handles the playback loop.
 
         This method is called in a background thread to continuously send
         frames at the specified frame rate until playback is cancelled.
         """
-        while not self._cancelled:
-            self._step_one_frame()
-            time.sleep(1 / self.fps)  # Delay sending frames so we hit the desired FPS
-        self._cancelled = False
 
-    def _step_one_frame(self):
-        """Sends the current frame and advances the frame index."""
-        self.send_frame()
-        self.frame_index = (self.frame_index + 1) % self.universe.trajectory.n_frames
+        # During playback the frame index is iteratively advanced and the
+        # corresponding frame data sent. It is important that the frame index
+        # is advanced at the start of the loop, rather than at the end. This
+        # ensures that the `_frame_index` attribute matches up with the currently
+        # displayed frame. The downside to this is that the first frame will be
+        # skipped over when this method is called for the very first time.
+        while not self.__cancel_event.is_set():
 
-    def cancel_playback(self, wait=False):
-        """Cancels the trajectory playback if it is running.
+            # Advance to the next frame
+            self._frame_index = (self._frame_index + 1) % self.universe.trajectory.n_frames
 
-        Arguments:
-            wait: A boolean indicating if the method should wait until playback
-                stops before returning.
-        """
-        if self._run_task is None:
-            return
+            # Send the frame
+            self.send_frame()
 
-        if self._cancelled:
-            return
-        self._cancelled = True
-        if wait:
-            self._run_task.result()
-            self._cancelled = False
+            # Sleep until it is time to send the next frame
+            time.sleep(1 / self.fps)
 
     def reset(self):
-        """Resets the trajectory playback to the first frame."""
-        self.frame_index = 0
+        """Reset the trajectory playback to the first frame."""
+        self._frame_index = 0
 
     def close(self):
-        """Close down the server."""
+        """Shutdown the NanoVer server."""
+        # Stop the playback thread if it is active
         self.pause()
-        self.cancel_playback(True)
+
+        # Closed down the ghost client used to define selections
+        if self.__client is not None:
+            self.__client.close()
+
+        # Terminate the frame server
         self.frame_server.close()
-        self.frame_server = None
-        self.__initial_topology_has_been_sent = False
-        self._send_meta_data = True
-        self.__root_selection = True
-        del self.__client
-        self.__client = None
+
+        # Ensure that this playback entity cannot be reused.
+        self.__server_has_shutdown = True
 
     def send_topology_frame(self):
         """Sends the topology frame to the NanoVer frame server.
@@ -425,12 +454,12 @@ class TrajectoryPlayback:
     def send_frame(self):
         """Sends the current frame's particle positions to the NanoVer frame server."""
 
-        index = self.frame_index
+        index = self._frame_index
 
         trajectory: DNemdTrajectoryGenerator = self.universe.trajectory
 
         if not isinstance(trajectory, DNemdTrajectoryGenerator):
-            raise TypeError("Trajectory object must be a `SimpleGenerator` instance.")
+            raise TypeError("Trajectory object must be a `DNemdTrajectoryGenerator` instance.")
 
         # Send the particle positions of the given trajectory index.
         if not (0 <= index < self.universe.trajectory.n_frames):
@@ -439,12 +468,6 @@ class TrajectoryPlayback:
         # Set the target frame (setting the target frame by getting the time step somewhat non-pythonic)
         _ = self.universe.trajectory[index]
         frame = mdanalysis_to_frame_data(self.universe, topology=False, positions=True)
-
-        if self.displacement_normalisation_lower_bound is None:
-            self.displacement_normalisation_lower_bound = trajectory.minimum_displacement_distance
-
-        if self.displacement_normalisation_upper_bound is None:
-            self.displacement_normalisation_upper_bound = trajectory.maximum_displacement_distance
 
         norm_displacements = self.exponential_normalisation(
             trajectory.get_displacement_norms(),
@@ -496,11 +519,6 @@ class TrajectoryPlayback:
             renderer: Name of the renderer to be applied to the root selection.
         """
 
-        # Ensure that a frame server exists, otherwise setting the renderer via this
-        # method has no meaning.
-        if self.frame_server is None:
-            self.frame_server = NanoverFrameApplication.basic_server(port=0)
-
         if self.__client is None:
             self.__client = NanoverImdClient.autoconnect()
             self.__client.subscribe_multiplayer()
@@ -510,10 +528,6 @@ class TrajectoryPlayback:
         self.__root_selection.renderer = renderer
         self.__root_selection.flush_changes()
 
-    def record(self):
-        # Note, using "localhost" will not necessarily continue to work when
-        # and if server authentication is implemented.
-        record_from_server(
-            f"localhost:{self.frame_server.port}",
-            f"{self._record_to_file}.traj",
-            f"{self._record_to_file}.state")
+    def __del__(self):
+        self.close()
+

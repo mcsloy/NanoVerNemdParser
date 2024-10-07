@@ -173,6 +173,5 @@ if __name__ == "__main__":
     # Do not terminate the python thread, and therefore the server, until the user
     # expressly indicates that it safe to do so via depression of the return key.
     prompt = input("> Press the return key to terminate the server...")
-    trajectory_player.pause()
     trajectory_player.frame_server.close()
     exit()
