@@ -527,7 +527,36 @@ def _convert_old_files(
     from os.path import join, basename
     import re
     import glob
-    from ase.io import read
+    from MDAnalysis import Universe
+
+    chemical_symbols = [
+        # Period zero
+        'X',
+        # Period one
+        'H', 'He',
+        # Period two
+        'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne',
+        # Period three
+        'Na', 'Mg', 'Al', 'Si', 'P', 'S', 'Cl', 'Ar',
+        # Period four
+        'K', 'Ca', 'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn',
+        'Ga', 'Ge', 'As', 'Se', 'Br', 'Kr',
+        # Period five
+        'Rb', 'Sr', 'Y', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd',
+        'In', 'Sn', 'Sb', 'Te', 'I', 'Xe',
+        # Period six
+        'Cs', 'Ba', 'La', 'Ce', 'Pr', 'Nd', 'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy',
+        'Ho', 'Er', 'Tm', 'Yb', 'Lu', 'Hf', 'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt',
+        'Au', 'Hg', 'Tl', 'Pb', 'Bi', 'Po', 'At', 'Rn',
+        # Period seven
+        'Fr', 'Ra', 'Ac', 'Th', 'Pa', 'U', 'Np', 'Pu', 'Am', 'Cm', 'Bk', 'Cf',
+        'Es', 'Fm', 'Md', 'No', 'Lr', 'Rf', 'Db', 'Sg', 'Bh', 'Hs', 'Mt', 'Ds',
+        'Rg', 'Cn', 'Nh', 'Fl', 'Mc', 'Lv', 'Ts', 'Og'
+    ]
+
+    # Dictionary for looking up an element's atomic number.
+    atomic_numbers = {sym: z for z, sym in enumerate(chemical_symbols)}
+
 
     def locate_files():
         pattern = kwargs.get("pattern", "average_xyz_displacement_*ps")
@@ -598,14 +627,13 @@ def _convert_old_files(
     # The old files do not supply the indices of the atoms associated with each
     # displacement. Rather they provide the carbon-alpha index number. This is
     # converted into an atomic index for ease of use.
-
-    atoms = read(structure_file_path)
-    atom_types = atoms.arrays["atomtypes"]
+    atoms = Universe(structure_file_path).atoms
+    atom_types = atoms.names
     alpha_to_atom_index_map = np.where(np.equal(atom_types, "CA"))[0]
     atomic_indices = alpha_to_atom_index_map[carbon_alpha_index[0]]
 
     return DisplacementFrames(
-        atoms.get_atomic_numbers(),
+        np.array([atomic_numbers[i] for i in atoms.types]),
         atoms.positions,
         atomic_indices, np.array(average_displacement),
         np.linalg.norm(average_displacement, axis=-1),
